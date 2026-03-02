@@ -3,19 +3,33 @@ name = "agent"
 version = "0.1.0"
 description = "A coding agent with TUI using Textual and pydantic-ai."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "textual",
     "pydantic-ai",
+    "pyperclip>=1.11.0",
+    "requests",
+    "textual-autocomplete>=4.0.6",
+]
+
+[project.optional-dependencies]
+dev = [
     "ruff",
-    "black"
+    "black",
+    "pytest",
+    "pytest-asyncio",
+    "requests-mock",
 ]
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
 extend-select = ["I"]
 
 [tool.black]
 line-length = 100
 
-# No [tool.uv] block required - handled by 'requires-python' above
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
