@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class MessageOutput(Markdown):
     """A Markdown widget for displaying rendered messages."""
 
-    can_focus = True
+    can_focus = False
 
     DEFAULT_CSS = """
     MessageOutput {
@@ -74,8 +74,8 @@ class MessageOutput(Markdown):
         self.app.notify(f"Copied {len(self._raw_text)} characters")
 
     def on_click(self) -> None:
-        """Focus the message when clicked."""
-        self.focus()
+        """Copy on click instead of stealing focus."""
+        self.action_copy_to_clipboard()
 
 
 class UserInput(TextArea):
@@ -209,6 +209,11 @@ class CodingAgentApp(App):
         self.chat_container = self.query_one("#chat-container", ScrollableContainer)
         self.input_widget.focus()
         self.agent = CodingAgent()
+
+    def on_descendant_focus(self, event) -> None:
+        """Keep focus on the input widget at all times."""
+        if not isinstance(event.widget, UserInput):
+            self.input_widget.focus()
 
     async def _add_message(self, text: str) -> MessageOutput:
         """Add a message bubble to chat."""
