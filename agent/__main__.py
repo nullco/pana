@@ -101,12 +101,15 @@ class UserInput(TextArea):
 
     async def on_key(self, event) -> None:
         """Handle key events."""
-        if event.key == "shift+enter":
+        if event.key in ("shift+enter", "ctrl+n"):
             event.prevent_default()
             self.insert("\n")
         elif event.key == "enter":
             event.prevent_default()
             self.post_message(self.Submit(self.text))
+        elif event.key == "slash" and not self.text:
+            event.prevent_default()
+            self.app.action_command_palette()
 
 
 class CodingAgentApp(App):
