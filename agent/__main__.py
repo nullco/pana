@@ -74,9 +74,9 @@ class MessageOutput(Markdown):
             self.app.copy_to_clipboard(self._raw_text)
         self.app.notify(f"Copied {len(self._raw_text)} characters")
 
-    def on_click(self) -> None:
-        """Copy on click instead of stealing focus."""
-        self.action_copy_to_clipboard()
+    def on_click(self, event) -> None:
+        """Focus this widget on click without copying (copy is handled by text selection)."""
+        event.stop()
 
 
 class UserInput(TextArea):
@@ -148,14 +148,15 @@ class CodingAgentApp(App):
     def on_text_selected(self, event: TextSelected) -> None:
         """Auto-copy selected text to clipboard on mouse release."""
         selected = self.screen.get_selected_text()
-        if selected:
-            try:
-                import pyperclip
+        if not selected:
+            return
+        try:
+            import pyperclip
 
-                pyperclip.copy(selected)
-            except Exception:
-                self.copy_to_clipboard(selected)
-            self.notify(f"Copied {len(selected)} characters")
+            pyperclip.copy(selected)
+        except Exception:
+            self.copy_to_clipboard(selected)
+        self.notify(f"Copied {len(selected)} characters")
 
     def action_copy_focused(self) -> None:
         """Copy the focused message to clipboard."""
