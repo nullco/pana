@@ -21,6 +21,7 @@ class ModelManager:
         self.auth = authenticator
         self._models_cache: List[dict] = []
         self.current_model: Optional[str] = None
+        self.load_selected()
 
     def _get_token(self) -> Optional[str]:
         # Prefer the authenticator's copilot token
@@ -129,9 +130,11 @@ class ModelManager:
         for m in models:
             if m.get("id") == model_id or m.get("name") == model_id:
                 self.current_model = m.get("id")
+                self.save_selected()
                 return True
         # If not found, allow selecting by raw string (optimistic)
         self.current_model = model_id
+        self.save_selected()
         return True
 
     def enable_model(self, model_id: str) -> bool:

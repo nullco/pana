@@ -7,6 +7,7 @@ provider-specific modules.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Optional
 
@@ -21,11 +22,26 @@ AVAILABLE_PROVIDERS = ["copilot", "openai"]
 
 class AIManager:
     def __init__(self, provider_name: str | None = None):
-        self._provider_name = provider_name or "copilot"
-        self._provider = get_provider(self._provider_name)
         self._model = None
         self._auth = None
+        self._model_manager = None
+        self._model_name: Optional[str] = None
+
+        persisted = self._load_state()
+        resolved_provider = provider_name or persisted.get("provider") or "copilot"
+        if resolved_provider not in AVAILABLE_PROVIDERS:
+            resolved_provider = "copilot"
+
+        self._provider_name = resolved_provider
+        self._provider = get_provider(self._provider_name)
         self._model_manager = self._provider.get_model_manager()
+
+        persisted_model = persisted.get("models", {}).get(self._provider_name)
+        if persisted_model:
+            self._apply_persisted_model(persisted_model)
+
+        if provider_name is not None:
+            self._save_state()
 
     def provider(self):
         return self._provider
@@ -33,6 +49,50 @@ class AIManager:
     def provider_name(self) -> str:
         """Get the current provider name."""
         return self._provider_name
+
+    def _default_state_path(self) -> str:
+        import os
+
+        cfg_dir = os.path.expanduser(os.getenv("AGENT_CONFIG_DIR", "~/.config/007"))
+        try:
+            os.makedirs(cfg_dir, exist_ok=True)
+        except Exception:
+            pass
+        return os.path.join(cfg_dir, "ai_state.json")
+
+    def _load_state(self) -> dict:
+        import os
+
+        path = self._default_state_path()
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_state(self) -> None:
+        path = self._default_state_path()
+        state = self._load_state()
+        models = state.get("models") if isinstance(state.get("models"), dict) else {}
+        if self._model_name:
+            models[self._provider_name] = self._model_name
+        state = {
+            "provider": self._provider_name,
+            "models": models,
+        }
+        try:
+            with open(path, "w") as f:
+                json.dump(state, f)
+        except Exception:
+            logger.debug("Failed to save AI state to %s", path)
+
+    def _apply_persisted_model(self, model_id: str) -> None:
+        self._model_name = model_id
+        if self._model_manager:
+            self._model_manager.current_model = model_id
 
     def build_model(self, model_name: str | None = None):
         """Build (or rebuild) the provider model instance."""
@@ -69,6 +129,13 @@ class AIManager:
             self._model = None
             self._auth = None
             self._model_manager = self._provider.get_model_manager()
+
+            persisted = self._load_state().get("models", {})
+            persisted_model = persisted.get(self._provider_name)
+            if persisted_model:
+                self._apply_persisted_model(persisted_model)
+
+            self._save_state()
             return True
         except Exception as e:
             logger.error("Failed to switch provider: %s", e)
@@ -137,7 +204,11 @@ class AIManager:
             return False
         
         try:
-            return model_manager.select_model(model_id)
+            selected = model_manager.select_model(model_id)
+            if selected:
+                self._model_name = model_manager.current_model or model_id
+                self._save_state()
+            return selected
         except Exception as e:
             logger.debug("Failed to select model: %s", e)
             return False
@@ -146,9 +217,9 @@ class AIManager:
         """Get the currently selected model ID."""
         model_manager = self.get_model_manager()
         if not model_manager:
-            return None
+            return self._model_name
         
-        return model_manager.current_model
+        return model_manager.current_model or self._model_name
 
     def refresh_if_needed(self, model_name: str | None = None):
         """If the provider has an authenticator that can refresh tokens,

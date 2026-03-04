@@ -37,6 +37,19 @@ class CopilotAuthenticator:
             self.github_token = os.getenv("GITHUB_API_KEY")
         if not self.copilot_token:
             self.copilot_token = os.getenv("COPILOT_API_KEY")
+        if self.copilot_expires_ms is None:
+            expires_env = os.getenv("COPILOT_EXPIRES_MS")
+            if expires_env:
+                try:
+                    self.copilot_expires_ms = int(expires_env)
+                except ValueError:
+                    self.copilot_expires_ms = None
+
+        if self.github_token and (not self.copilot_token or self.is_token_expired() or self.copilot_expires_ms is None):
+            try:
+                self._apply_copilot_token(self.github_token)
+            except Exception:
+                logger.debug("Failed to refresh Copilot token on init")
 
     def cancel(self) -> None:
         """Signal cancellation to any running poll."""
@@ -96,6 +109,8 @@ class CopilotAuthenticator:
             self.copilot_token = creds.copilot_token
             self.copilot_expires_ms = creds.expires_ms
             os.environ["COPILOT_API_KEY"] = creds.copilot_token
+            if creds.expires_ms is not None:
+                os.environ["COPILOT_EXPIRES_MS"] = str(creds.expires_ms)
             copilot_oauth.enable_all_models(creds.copilot_token)
 
     def is_token_expired(self) -> bool:
@@ -110,7 +125,7 @@ class CopilotAuthenticator:
         """Refresh the Copilot token if expired or missing. Returns True if refreshed."""
         if not self.github_token:
             return False
-        if self.copilot_token and not self.is_token_expired():
+        if self.copilot_token and self.copilot_expires_ms is not None and not self.is_token_expired():
             return False
         self._apply_copilot_token(self.github_token)
         return self.copilot_token is not None
@@ -125,6 +140,8 @@ class CopilotAuthenticator:
             del os.environ["GITHUB_API_KEY"]
         if "COPILOT_API_KEY" in os.environ:
             del os.environ["COPILOT_API_KEY"]
+        if "COPILOT_EXPIRES_MS" in os.environ:
+            del os.environ["COPILOT_EXPIRES_MS"]
 
         if os.getenv("AGENT_PERSIST_TOKENS", "true").lower() not in ("0", "false", "no"):
             self._remove_tokens_from_env_file()
@@ -163,6 +180,8 @@ class CopilotAuthenticator:
             existing["GITHUB_API_KEY"] = self.github_token
         if self.copilot_token:
             existing["COPILOT_API_KEY"] = self.copilot_token
+        if self.copilot_expires_ms is not None:
+            existing["COPILOT_EXPIRES_MS"] = str(self.copilot_expires_ms)
 
         try:
             with open(env_path, "w") as f:
@@ -185,7 +204,7 @@ class CopilotAuthenticator:
             lines = []
             with open(env_path) as f:
                 for line in f:
-                    if line.startswith("GITHUB_API_KEY=") or line.startswith("COPILOT_API_KEY="):
+                    if line.startswith("GITHUB_API_KEY=") or line.startswith("COPILOT_API_KEY=") or line.startswith("COPILOT_EXPIRES_MS="):
                         continue
                     lines.append(line)
 
