@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from .base import BaseAgent
+from ai.types import Provider
 
 
 class AgentInput(BaseModel):
@@ -18,21 +19,21 @@ class CodingAgent(BaseAgent):
 
     Input = AgentInput
 
-    def __init__(self, provider_name: str | None = None, model_name: str | None = None, **kwargs):
+    def __init__(self, provider: Provider, model_name: str | None = None, **kwargs):
         """Initialize the coding agent.
-        
+
         Args:
-            provider_name: Name of the provider (e.g., 'copilot', 'openai').
+            provider: Provider instance (e.g., CopilotProvider, OpenAIProvider).
             model_name: Name/ID of the model to use. If None, uses provider default.
         """
-        super().__init__(provider_name=provider_name, model_name=model_name)
+        super().__init__(provider=provider, model_name=model_name)
         self._kwargs = kwargs
 
     async def chat(self, user_input: str) -> None:
         """Send a message and handle the response.
-        
+
         This is an alias for stream() for more intuitive naming.
-        
+
         Args:
             user_input: The user's message.
             stream_handler: Callback for streaming updates.

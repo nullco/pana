@@ -111,7 +111,7 @@ class CodingAgentApp(App):
     def _cancel_background_tasks(self) -> None:
         """Cancel all background tasks."""
         authenticator = self.app_config.get_authenticator()
-        if authenticator and hasattr(authenticator, "cancel"):
+        if authenticator:
             authenticator.cancel()
         for task in self._background_tasks:
             task.cancel()
@@ -260,8 +260,8 @@ class CodingAgentApp(App):
             provider_name = self.app_config.ai_manager.provider_name()
         
         authenticator = self.app_config.get_authenticator(provider_name)
-        
-        if not authenticator or not hasattr(authenticator, "poll_for_token"):
+
+        if not authenticator:
             return
             
         try:

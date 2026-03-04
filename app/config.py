@@ -27,7 +27,7 @@ class AppConfig:
         self.provider_name = provider_name
         self.ai_manager = AIManager(provider_name)
         self.auth_manager = AuthManager()
-        self.agent = CodingAgent(provider_name=provider_name or self.ai_manager.provider_name())
+        self.agent = CodingAgent(provider=self.ai_manager.provider())
 
     def get_authenticator(self, provider_name: str | None = None):
         """Get an authenticator for a provider.
@@ -53,6 +53,6 @@ class AppConfig:
         """
         current_model = self.ai_manager.get_current_model()
         self.agent = CodingAgent(
-            provider_name=self.ai_manager.provider_name(),
-            model_name=current_model
+            provider=self.ai_manager.provider(),
+            model_name=current_model,
         )

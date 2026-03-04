@@ -5,6 +5,7 @@ import logging
 from typing import List, Optional
 
 from . import copilot_oauth
+from .auth import CopilotAuthenticator
 from .models import get_available_models
 
 logger = logging.getLogger(__name__)
@@ -16,27 +17,23 @@ class ModelManager:
     This keeps a session-scoped current_model (string id) and a cached models list.
     """
 
-    def __init__(self, authenticator: Optional[object] = None):
+    def __init__(self, authenticator: Optional[CopilotAuthenticator] = None):
         self.auth = authenticator
         self._models_cache: List[dict] = []
         self.current_model: Optional[str] = None
 
     def _get_token(self) -> Optional[str]:
         # Prefer the authenticator's copilot token
-        if self.auth and getattr(self.auth, "copilot_token", None):
+        if self.auth and self.auth.copilot_token:
             return self.auth.copilot_token
 
         # If authenticator has a GitHub token but no Copilot token, try to exchange it
         try:
-            if self.auth and getattr(self.auth, "github_token", None):
+            if self.auth and self.auth.github_token:
                 creds = copilot_oauth.exchange_for_copilot_token(self.auth.github_token)
                 if creds and creds.copilot_token:
-                    # apply to authenticator if possible
-                    try:
-                        self.auth.copilot_token = creds.copilot_token
-                        self.auth.copilot_expires_ms = creds.expires_ms
-                    except Exception:
-                        pass
+                    self.auth.copilot_token = creds.copilot_token
+                    self.auth.copilot_expires_ms = creds.expires_ms
                     # set env fallback
                     import os
 
@@ -116,7 +113,7 @@ class ModelManager:
         if refresh or not self._models_cache:
             # Ensure token is up-to-date if authenticator provided
             try:
-                if self.auth and hasattr(self.auth, "refresh_token"):
+                if self.auth:
                     self.auth.refresh_token()
             except Exception:
                 logger.debug("Auth refresh failed when getting models")

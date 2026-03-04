@@ -11,6 +11,7 @@ import logging
 from typing import Optional
 
 from ai.providers.factory import get_provider
+from ai.types import ModelManager
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ class AIManager:
             self._auth = self._provider.get_authenticator()
         return self._auth
 
-    def get_model_manager(self) -> Optional[object]:
+    def get_model_manager(self) -> Optional[ModelManager]:
         """Get the current provider's model manager."""
         return self._provider.get_model_manager()
 
@@ -88,8 +89,8 @@ class AIManager:
             try:
                 provider = get_provider(provider_name)
                 model_manager = provider.get_model_manager()
-                
-                if model_manager and hasattr(model_manager, "get_models"):
+
+                if model_manager:
                     models = model_manager.get_models(refresh=refresh)
                     for model in models:
                         model["provider"] = provider_name
@@ -113,12 +114,10 @@ class AIManager:
             return []
         
         try:
-            if hasattr(model_manager, "get_models"):
-                return model_manager.get_models(refresh=refresh)
+            return model_manager.get_models(refresh=refresh)
         except Exception as e:
             logger.debug("Failed to get available models: %s", e)
-        
-        return []
+            return []
 
     def select_model(self, model_id: str) -> bool:
         """Select a model.
@@ -134,12 +133,10 @@ class AIManager:
             return False
         
         try:
-            if hasattr(model_manager, "select_model"):
-                return model_manager.select_model(model_id)
+            return model_manager.select_model(model_id)
         except Exception as e:
             logger.debug("Failed to select model: %s", e)
-        
-        return False
+            return False
 
     def get_current_model(self) -> Optional[str]:
         """Get the currently selected model ID."""
@@ -147,7 +144,7 @@ class AIManager:
         if not model_manager:
             return None
         
-        return getattr(model_manager, "current_model", None)
+        return model_manager.current_model
 
     def refresh_if_needed(self, model_name: str | None = None):
         """If the provider has an authenticator that can refresh tokens,
@@ -155,7 +152,7 @@ class AIManager:
         """
         auth = self.get_authenticator()
         try:
-            if auth and hasattr(auth, "refresh_token") and auth.refresh_token():
+            if auth and auth.refresh_token():
                 logger.debug("auth.refresh_token() returned True — rebuilding model")
                 return self.build_model(model_name)
         except Exception:
