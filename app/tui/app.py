@@ -122,22 +122,18 @@ class AgentApp(App):
         """Initialize the app after mounting."""
         self.input_widget = self.query_one("#user_input", UserInput)
         self.chat_container = self.query_one("#chat-container", ScrollableContainer)
-        model = state.get("model")
-        provider = state.get("provider")
-        if model and provider:
-            self.select_model(model, provider)
+        model_id = state.get("model")
+        provider_name = state.get("provider")
+        if model_id and provider_name:
+            provider = get_provider(provider_name)
+            model = provider.build_model(model_id)
+            self._agent = Agent(model)
         self._update_model_footer()
         self.input_widget.focus()
 
-    async def on_shutdown(self):
-        current = asyncio.current_task()
-
-        tasks = [t for t in asyncio.all_tasks() if t is not current]
-
-        for task in tasks:
-            task.cancel()
-
-        await asyncio.gather(*tasks, return_exceptions=True)
+    def exit(self) -> None:
+        state.save()
+        super().exit()
 
     def on_descendant_focus(self, event) -> None:
         """Keep focus on the input widget at all times."""
