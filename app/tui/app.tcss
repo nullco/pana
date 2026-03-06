@@ -1,3 +1,16 @@
-TextArea .text-area--gutter {
-    background: $surface;
+UserInput {
+    height: 5;
+    max-height: 10;
+    margin: 0 2;
+    border: round $primary;
+    background: transparent;
+}
+
+UserInput > .text-area--cursor-line {
+    background: transparent;
+}
+
+UserInput:focus {
+    border: round $primary;
+    background: transparent;
 }
