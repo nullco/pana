@@ -73,6 +73,10 @@ class UserInput(TextArea):
         background: transparent;
     }
 
+    UserInput > .text-area--cursor-line {
+        background: transparent;
+    }
+
     UserInput:focus {
         border: round $primary-muted;
         background: transparent;
