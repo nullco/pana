@@ -64,25 +64,6 @@ class MessageOutput(Markdown):
 class UserInput(TextArea):
     """A TextArea for user input with command suggestions."""
 
-    DEFAULT_CSS = """
-    UserInput {
-        height: auto;
-        max-height: 10;
-        margin: 0 1;
-        border: round $primary-muted;
-        background: transparent;
-    }
-
-    UserInput > .text-area--cursor-line {
-        background: transparent;
-    }
-
-    UserInput:focus {
-        border: round $primary-muted;
-        background: transparent;
-    }
-    """
-
     class Submit(Message):
         """Message emitted when user submits input."""
 

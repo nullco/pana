@@ -118,7 +118,7 @@ class AgentApp(App):
         yield Header(id="header")
         with Vertical(id="main"):
             yield ScrollableContainer(id="chat-container")
-            yield UserInput(id="user_input")
+            yield UserInput(id="user_input", classes='user-input')
         yield ModelFooter(id="footer")
 
     async def on_mount(self) -> None:

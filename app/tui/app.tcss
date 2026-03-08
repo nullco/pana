@@ -1,4 +1,4 @@
-UserInput {
+.user-input {
     height: 5;
     max-height: 10;
     margin: 0 2;
@@ -6,11 +6,11 @@ UserInput {
     background: transparent;
 }
 
-UserInput > .text-area--cursor-line {
+.user-input > .text-area--cursor-line {
     background: transparent;
 }
 
-UserInput:focus {
+.user-input:focus {
     border: round $primary;
     background: transparent;
 }
