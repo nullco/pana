@@ -9,6 +9,7 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
+from prompt_toolkit.styles import Style
 from prompt_toolkit.validation import Validator
 from rich.console import Console
 from rich.live import Live
@@ -33,6 +34,17 @@ COMMANDS = {
 _QUIT_ALIASES = ("/quit", "/exit", "/q")
 
 _completer = WordCompleter(list(COMMANDS.keys()), meta_dict=COMMANDS, sentence=True)
+
+_style = Style.from_dict({
+    "completion-menu": "bg:default default",
+    "completion-menu.completion": "bg:default default",
+    "completion-menu.completion.current": "bg:default bold",
+    "completion-menu.meta.completion": "bg:default #888888",
+    "completion-menu.meta.completion.current": "bg:default #888888 bold",
+    "scrollbar.background": "bg:default",
+    "scrollbar.button": "bg:default",
+    "bottom-toolbar": "bg:default #888888 noreverse",
+})
 
 
 def _build_toolbar(agent: Agent | None) -> HTML:
@@ -74,7 +86,7 @@ async def _pick(options: list[str]) -> str | None:
         def _(event):
             event.app.exit(exception=EOFError)
 
-        picker = PromptSession(completer=completer, key_bindings=kb)
+        picker = PromptSession(completer=completer, key_bindings=kb, style=_style)
         picker.app.ttimeoutlen = 0.0
         picker.default_buffer.on_text_changed += lambda buf: buf.start_completion()
         return await picker.prompt_async(
@@ -169,7 +181,7 @@ async def main() -> None:
 
     console.print("[dim]Type /help for commands.[/dim]\n")
 
-    session: PromptSession[str] = PromptSession(completer=_completer)
+    session: PromptSession[str] = PromptSession(completer=_completer, style=_style)
 
     while True:
         try:
