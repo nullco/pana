@@ -1,7 +1,8 @@
-"""Minimalist terminal UI using Rich for rendering and prompt-toolkit for input."""
+"""Minimalist terminal UI using prompt-toolkit for input and Pygments for syntax highlighting."""
 
 import asyncio
 import logging
+import re
 import sys
 
 from prompt_toolkit import PromptSession
@@ -12,17 +13,53 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.styles import Style
 from prompt_toolkit.validation import Validator
-from rich.console import Console
-from rich.live import Live
-from rich.markdown import Markdown
-from rich.text import Text
+from pygments import highlight
+from pygments.formatters import TerminalTrueColorFormatter
+from pygments.lexers import get_lexer_by_name, guess_lexer
 
 from agents.agent import Agent
 from ai.providers.factory import get_provider, get_providers
 from state import state
 
 logger = logging.getLogger(__name__)
-console = Console()
+
+_CODE_BLOCK_RE = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+
+
+def _format_markdown(text: str) -> str:
+    """Return markdown with syntax-highlighted code blocks and minimal formatting."""
+    parts: list[str] = []
+    last = 0
+    for m in _CODE_BLOCK_RE.finditer(text):
+        before = text[last:m.start()]
+        if before.strip():
+            parts.append(_format_plain(before))
+        lang, code = m.group(1), m.group(2)
+        parts.append(_format_code(code, lang))
+        last = m.end()
+    tail = text[last:]
+    if tail.strip():
+        parts.append(_format_plain(tail))
+    return "\n\n".join(parts)
+
+
+def _format_plain(text: str) -> str:
+    """Return text with bold and inline code converted to ANSI."""
+    text = text.strip("\n")
+    text = _BOLD_RE.sub(r"\033[1m\1\033[0m", text)
+    text = _INLINE_CODE_RE.sub(r"\033[36m\1\033[0m", text)
+    return text
+
+
+def _format_code(code: str, lang: str) -> str:
+    """Return a code block with Pygments syntax highlighting."""
+    try:
+        lexer = get_lexer_by_name(lang) if lang else guess_lexer(code)
+    except Exception:
+        lexer = get_lexer_by_name("text")
+    return highlight(code, lexer, TerminalTrueColorFormatter(style="monokai")).rstrip("\n")
 
 COMMANDS = {
     "/login": "Authenticate with a provider",
@@ -62,7 +99,7 @@ def _build_toolbar(agent: Agent | None) -> HTML:
 async def _pick(options: list[str]) -> str | None:
     """Prompt the user to pick from a list with fuzzy autocomplete."""
     if not options:
-        console.print("[red]No options available.[/red]")
+        print("\033[31mNo options available.\033[0m")
         return None
     def _fuzzy_match(text: str, target: str) -> bool:
         it = iter(target.lower())
@@ -111,10 +148,10 @@ async def _cmd_login(agent: Agent | None) -> Agent | None:
     provider = get_provider(name)
 
     async def handler(result):
-        console.print(result)
+        print(result)
 
     await provider.authenticate(handler)
-    console.print(f"[green]Authenticated with {name}.[/green]")
+    print(f"\033[32mAuthenticated with {name}.\033[0m")
     return agent
 
 
@@ -129,7 +166,7 @@ async def _cmd_model(agent: Agent | None) -> Agent | None:
             options[label] = (model_id, pname)
 
     if not options:
-        console.print("[red]No models available. Login first.[/red]")
+        print("\033[31mNo models available. Login first.\033[0m")
         return agent
 
     pick = await _pick(list(options))
@@ -145,28 +182,35 @@ async def _cmd_model(agent: Agent | None) -> Agent | None:
         agent.set_model(model)
     state.set("provider", provider_name)
     state.set("model", model_id)
-    console.print(f"[green]Switched to {model_id} ({provider_name}).[/green]")
+    print(f"\033[32mSwitched to {model_id} ({provider_name}).\033[0m")
     return agent
 
 
 async def _stream_response(agent: Agent, user_text: str) -> None:
     try:
-        with Live(Text("…", style="dim"), console=console, refresh_per_second=8) as live:
+        # Save cursor position before first render
+        sys.stdout.write("\033[s")
+        sys.stdout.flush()
 
-            def stream_handler(update: str) -> None:
-                live.update(Markdown(update, code_theme="native"))
+        def stream_handler(update: str) -> None:
+            # Restore cursor to saved position and clear everything below
+            sys.stdout.write("\033[u\033[J")
+            sys.stdout.write(_format_markdown(update))
+            sys.stdout.flush()
 
-            await agent.stream(user_text, stream_handler)
+        await agent.stream(user_text, stream_handler)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
     except Exception as e:
         logger.exception("Error during agent stream")
-        console.print(f"[red]❌ {e}[/red]")
+        print(f"\033[31m❌ {e}\033[0m")
 
 
 # -- Main loop ---------------------------------------------------------------
 
 
 async def main() -> None:
-    console.print("[bold cyan]Agent 007[/bold cyan] — mini mode\n")
+    print("\033[1;36mAgent 007\033[0m — mini mode\n")
 
     agent: Agent | None = None
 
@@ -178,11 +222,11 @@ async def main() -> None:
             provider = get_provider(provider_name)
             model = await provider.build_model(model_id)
             agent = Agent(model)
-            console.print(f"Model: [green]{model_id}[/green] ({provider_name})")
+            print(f"Model: \033[32m{model_id}\033[0m ({provider_name})")
         except Exception:
-            console.print("[yellow]Could not restore saved model.[/yellow]")
+            print("\033[33mCould not restore saved model.\033[0m")
 
-    console.print("[dim]Type /help for commands.[/dim]\n")
+    print("\033[2mType /help for commands.\033[0m\n")
 
     session: PromptSession[str] = PromptSession(completer=_completer, style=_style)
 
@@ -218,27 +262,27 @@ async def main() -> None:
             elif cmd == "/clear":
                 if agent:
                     agent.clear_history()
-                console.clear()
-                console.print("[dim]History cleared.[/dim]")
+                sys.stdout.write("\033[2J\033[H")
+                sys.stdout.flush()
+                print("\033[2mHistory cleared.\033[0m")
             elif cmd == "/login":
                 agent = await _cmd_login(agent)
             elif cmd == "/model":
                 agent = await _cmd_model(agent)
             elif cmd == "/help":
-                lines = ["[bold]Commands:[/bold]"]
+                print("\033[1mCommands:\033[0m")
                 for c, desc in COMMANDS.items():
-                    lines.append(f"  [cyan]{c:<8}[/cyan] — {desc}")
-                console.print("\n".join(lines))
+                    print(f"  \033[36m{c:<8}\033[0m — {desc}")
             else:
-                console.print(f"[red]Unknown command: {user_text}[/red]")
+                print(f"\033[31mUnknown command: {user_text}\033[0m")
             continue
 
         if not agent:
-            console.print("[red]❌ Please select a model first (/model)[/red]")
+            print("\033[31m❌ Please select a model first (/model)\033[0m")
             continue
 
         await _stream_response(agent, user_text)
-        console.print()
+        print()
 
 
 def run() -> None:
