@@ -23,9 +23,9 @@ from state import state
 
 logger = logging.getLogger(__name__)
 
-_CODE_BLOCK_RE = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
-_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
-_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+_CODE_BLOCK_RE = re.compile(r"```([\w+#.-]*)\n(.*?)```", re.DOTALL)
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"(?<!`)`(?!`)([^`]+)`(?!`)")
 
 COMMANDS = {
     "/login": "Authenticate with a provider",
@@ -71,8 +71,8 @@ def _format_markdown(text: str) -> str:
 
 def _format_plain(text: str) -> str:
     text = text.strip("\n")
-    text = _BOLD_RE.sub(r"\033[1m\1\033[0m", text)
-    return _INLINE_CODE_RE.sub(r"\033[36m\1\033[0m", text)
+    text = _INLINE_CODE_RE.sub(r"\033[36m\1\033[39m", text)
+    return _BOLD_RE.sub(r"\033[1m\1\033[22m", text)
 
 
 def _format_code(code: str, lang: str) -> str:
