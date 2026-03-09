@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import re
 import sys
 
 from prompt_toolkit import PromptSession
@@ -13,19 +12,12 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.styles import Style
 from prompt_toolkit.validation import Validator
-from pygments import highlight
-from pygments.formatters import TerminalTrueColorFormatter
-from pygments.lexers import get_lexer_by_name, guess_lexer
 
 from agents.agent import Agent
 from ai.providers.factory import get_provider, get_providers
 from state import state
 
 logger = logging.getLogger(__name__)
-
-_CODE_BLOCK_RE = re.compile(r"```([\w+#.-]*)\n(.*?)```", re.DOTALL)
-_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
-_INLINE_CODE_RE = re.compile(r"(?<!`)`(?!`)([^`]+)`(?!`)")
 
 COMMANDS = {
     "/login": "Authenticate with a provider",
@@ -49,38 +41,6 @@ _style = Style.from_dict({
     "scrollbar.button": "bg:default",
     "bottom-toolbar": "bg:default #888888 noreverse",
 })
-
-
-# -- Formatting ---------------------------------------------------------------
-
-
-def _format_markdown(text: str) -> str:
-    parts: list[str] = []
-    last = 0
-    for m in _CODE_BLOCK_RE.finditer(text):
-        before = text[last:m.start()]
-        if before.strip():
-            parts.append(_format_plain(before))
-        parts.append(_format_code(m.group(2), m.group(1)))
-        last = m.end()
-    tail = text[last:]
-    if tail.strip():
-        parts.append(_format_plain(tail))
-    return "\n\n".join(parts)
-
-
-def _format_plain(text: str) -> str:
-    text = text.strip("\n")
-    text = _INLINE_CODE_RE.sub(r"\033[36m\1\033[39m", text)
-    return _BOLD_RE.sub(r"\033[1m\1\033[22m", text)
-
-
-def _format_code(code: str, lang: str) -> str:
-    try:
-        lexer = get_lexer_by_name(lang) if lang else guess_lexer(code)
-    except Exception:
-        lexer = get_lexer_by_name("text")
-    return highlight(code, lexer, TerminalTrueColorFormatter(style="monokai")).rstrip("\n")
 
 
 # -- Helpers ------------------------------------------------------------------
@@ -193,7 +153,7 @@ async def _stream_response(agent: Agent, user_text: str) -> None:
 
         def stream_handler(update: str) -> None:
             sys.stdout.write("\033[u\033[J")
-            sys.stdout.write(_format_markdown(update))
+            sys.stdout.write(update)
             sys.stdout.flush()
 
         await agent.stream(user_text, stream_handler)
