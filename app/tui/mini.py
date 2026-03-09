@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import re
 import sys
 
 from prompt_toolkit import PromptSession
@@ -13,10 +12,6 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.styles import Style
 from prompt_toolkit.validation import Validator
-from pygments import highlight
-from pygments.formatters import TerminalFormatter
-from pygments.lexers import TextLexer, get_lexer_by_name, guess_lexer
-from pygments.util import ClassNotFound
 
 from agents.agent import Agent
 from ai.providers.factory import get_provider, get_providers
@@ -51,102 +46,9 @@ _style = Style.from_dict({
 # -- Helpers ------------------------------------------------------------------
 
 
-_INLINE_CODE_COLOR = "\033[38;5;214m"
-_HEADING_COLOR = "\033[1;36m"
-_RESET_STYLE = "\033[0m"
-
-
 def _clear_line() -> None:
     sys.stdout.write("\033[A\033[K")
     sys.stdout.flush()
-
-
-def _count_lines(text: str) -> int:
-    if not text:
-        return 0
-    return text.count("\n") + 1
-
-
-def _clear_rendered_lines(line_count: int, output_stream=None) -> None:
-    if line_count <= 0:
-        return
-    if output_stream is None:
-        output_stream = sys.stdout
-    for index in range(line_count):
-        output_stream.write("\033[2K")
-        if index < line_count - 1:
-            output_stream.write("\033[1A")
-        output_stream.write("\r")
-    output_stream.flush()
-
-
-def _apply_inline_code(text: str) -> str:
-    return re.sub(
-        r"`([^`]+)`",
-        lambda match: f"{_INLINE_CODE_COLOR}{match.group(1)}{_RESET_STYLE}",
-        text,
-    )
-
-
-def _style_heading(line: str) -> str:
-    stripped = line.lstrip("#")
-    if stripped == line:
-        return line
-    heading_text = stripped.strip()
-    if not heading_text:
-        return line
-    return f"{_HEADING_COLOR}{heading_text}{_RESET_STYLE}"
-
-
-def _highlight_code_block(code: str, language: str) -> str:
-    if not code:
-        return ""
-    lexer = None
-    if language:
-        try:
-            lexer = get_lexer_by_name(language)
-        except ClassNotFound:
-            lexer = None
-    if lexer is None:
-        try:
-            lexer = guess_lexer(code)
-        except ClassNotFound:
-            lexer = TextLexer()
-    return highlight(code, lexer, TerminalFormatter()).rstrip("\n")
-
-
-def _render_markdown(text: str) -> str:
-    if not text:
-        return ""
-    lines = text.splitlines()
-    rendered: list[str] = []
-    in_code_block = False
-    code_language = ""
-    code_lines: list[str] = []
-
-    for line in lines:
-        if line.startswith("```"):
-            if in_code_block:
-                rendered.append(_highlight_code_block("\n".join(code_lines), code_language))
-                in_code_block = False
-                code_language = ""
-                code_lines = []
-            else:
-                in_code_block = True
-                code_language = line[3:].strip()
-            continue
-
-        if in_code_block:
-            code_lines.append(line)
-            continue
-
-        styled_line = _apply_inline_code(_style_heading(line))
-        rendered.append(styled_line)
-
-    if in_code_block:
-        rendered.append(_highlight_code_block("\n".join(code_lines), code_language))
-
-    return "\n".join(rendered)
 
 
 def _build_toolbar(agent: Agent | None) -> HTML:
@@ -244,26 +146,24 @@ async def _cmd_model(agent: Agent | None) -> Agent | None:
     return agent
 
 
-async def _stream_response(agent: Agent, user_text: str, output_stream=None) -> None:
+async def _stream_response(agent: Agent, user_text: str) -> None:
     try:
-        if output_stream is None:
-            output_stream = sys.stdout
-        rendered_text = ""
-        last_line_count = 0
+        rendered = ""
 
         def stream_handler(update: str) -> None:
-            nonlocal rendered_text, last_line_count
-            rendered_text = update
-            rendered = _render_markdown(update)
-            _clear_rendered_lines(last_line_count, output_stream)
-            if rendered:
-                output_stream.write(rendered)
-            output_stream.flush()
-            last_line_count = _count_lines(rendered)
+            nonlocal rendered
+            if update.startswith(rendered):
+                chunk = update[len(rendered) :]
+            else:
+                chunk = update
+            rendered = update
+            if chunk:
+                sys.stdout.write(chunk)
+                sys.stdout.flush()
 
         await agent.stream(user_text, stream_handler)
-        output_stream.write("\n")
-        output_stream.flush()
+        sys.stdout.write("\n")
+        sys.stdout.flush()
     except Exception as e:
         logger.exception("Error during agent stream")
         print(f"\033[31m❌ {e}\033[0m")
@@ -272,32 +172,24 @@ async def _stream_response(agent: Agent, user_text: str, output_stream=None) -> 
 # -- Main loop ---------------------------------------------------------------
 
 
-async def main(
-    agent: Agent | None = None,
-    session_input=None,
-    session_output=None,
-) -> None:
+async def main() -> None:
     print("\033[1;36mAgent 007\033[0m — mini mode\n")
 
-    if agent is None:
-        model_id = state.get("model")
-        provider_name = state.get("provider")
-        if model_id and provider_name:
-            try:
-                model = await get_provider(provider_name).build_model(model_id)
-                agent = Agent(model)
-                print(f"Model: \033[32m{model_id}\033[0m ({provider_name})")
-            except Exception:
-                print("\033[33mCould not restore saved model.\033[0m")
+    agent: Agent | None = None
+
+    model_id = state.get("model")
+    provider_name = state.get("provider")
+    if model_id and provider_name:
+        try:
+            model = await get_provider(provider_name).build_model(model_id)
+            agent = Agent(model)
+            print(f"Model: \033[32m{model_id}\033[0m ({provider_name})")
+        except Exception:
+            print("\033[33mCould not restore saved model.\033[0m")
 
     print("\033[2mType /help for commands.\033[0m\n")
 
-    session: PromptSession[str] = PromptSession(
-        completer=_completer,
-        style=_style,
-        input=session_input,
-        output=session_output,
-    )
+    session: PromptSession[str] = PromptSession(completer=_completer, style=_style)
 
     while True:
         try:
