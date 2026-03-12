@@ -1,236 +1,460 @@
-"""Minimalist terminal UI using prompt-toolkit for input and Pygments for syntax highlighting."""
+"""Minimalist terminal UI built on the pi-tui Python backport."""
+
+from __future__ import annotations
 
 import asyncio
 import logging
 import sys
 
-from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import Completer, Completion, WordCompleter
-from prompt_toolkit.document import Document
-from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.keys import Keys
-from prompt_toolkit.styles import Style
-from prompt_toolkit.validation import Validator
+from pygments import highlight as _pyg_highlight
+from pygments.formatters import TerminalTrueColorFormatter
+from pygments.lexers import get_lexer_by_name, guess_lexer
+from pygments.util import ClassNotFound as _PygClassNotFound
 
 from agents.agent import Agent
 from ai.providers.factory import get_provider, get_providers
 from state import state
 
+from app.tui.autocomplete import AutocompleteItem, CombinedAutocompleteProvider, SlashCommand
+from app.tui.components.editor import Editor, EditorOptions, EditorTheme, SelectListTheme
+from app.tui.components.loader import Loader
+from app.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
+from app.tui.components.select_list import SelectItem, SelectList
+from app.tui.components.select_list import SelectListTheme as SLTheme
+from app.tui.components.spacer import Spacer
+from app.tui.components.text import Text
+from app.tui.components.truncated_text import TruncatedText
+from app.tui.terminal import ProcessTerminal
+from app.tui.tui import TUI
+
 logger = logging.getLogger(__name__)
 
-COMMANDS = {
-    "/login": "Authenticate with a provider",
-    "/model": "Select a model",
-    "/clear": "Clear chat history",
-    "/help": "Show available commands",
-    "/quit": "Exit",
+# ---------------------------------------------------------------------------
+# ANSI color helpers
+# ---------------------------------------------------------------------------
+
+def _cyan(s: str) -> str:
+    return f"\x1b[36m{s}\x1b[0m"
+
+def _dim(s: str) -> str:
+    return f"\x1b[2m{s}\x1b[0m"
+
+def _green(s: str) -> str:
+    return f"\x1b[32m{s}\x1b[0m"
+
+def _red(s: str) -> str:
+    return f"\x1b[31m{s}\x1b[0m"
+
+def _bold(s: str) -> str:
+    return f"\x1b[1m{s}\x1b[0m"
+
+def _italic(s: str) -> str:
+    return f"\x1b[3m{s}\x1b[0m"
+
+def _underline(s: str) -> str:
+    return f"\x1b[4m{s}\x1b[0m"
+
+def _strikethrough(s: str) -> str:
+    return f"\x1b[9m{s}\x1b[0m"
+
+def _yellow(s: str) -> str:
+    return f"\x1b[33m{s}\x1b[0m"
+
+def _magenta(s: str) -> str:
+    return f"\x1b[35m{s}\x1b[0m"
+
+def _gray(s: str) -> str:
+    return f"\x1b[90m{s}\x1b[0m"
+
+def _white(s: str) -> str:
+    return f"\x1b[37m{s}\x1b[0m"
+
+def _identity(s: str) -> str:
+    return s
+
+def _gold(s: str) -> str:
+    return f"\x1b[38;2;240;198;116m{s}\x1b[0m"
+
+
+# ---------------------------------------------------------------------------
+# Syntax highlighting
+# ---------------------------------------------------------------------------
+
+_pyg_formatter = TerminalTrueColorFormatter(style="monokai")
+
+
+def _highlight_code(code: str, lang: str | None) -> list[str]:
+    """Syntax-highlight *code* using Pygments, matching the original pi-tui behaviour."""
+    try:
+        if lang:
+            lexer = get_lexer_by_name(lang, stripall=True)
+        else:
+            lexer = guess_lexer(code)
+    except _PygClassNotFound:
+        return code.split("\n")
+    highlighted = _pyg_highlight(code, lexer, _pyg_formatter)
+    # Pygments adds a trailing newline; strip it so we don't get an extra blank line
+    if highlighted.endswith("\n"):
+        highlighted = highlighted[:-1]
+    return highlighted.split("\n")
+
+
+# ---------------------------------------------------------------------------
+# Themes
+# ---------------------------------------------------------------------------
+
+_select_list_theme = SLTheme(
+    selected_prefix=_cyan,
+    selected_text=_bold,
+    description=_dim,
+    scroll_info=_dim,
+    no_match=_dim,
+)
+
+_editor_select_theme = SelectListTheme(
+    selected_prefix=_cyan,
+    selected_text=_bold,
+    description=_dim,
+    scroll_info=_dim,
+    no_match=_dim,
+)
+
+_editor_theme = EditorTheme(
+    border_color=_dim,
+    select_list=_editor_select_theme,
+)
+
+_md_theme = MarkdownTheme(
+    heading=_gold,
+    link=_cyan,
+    link_url=_dim,
+    code=_yellow,
+    code_block=_identity,
+    code_block_border=_dim,
+    quote=_dim,
+    quote_border=_dim,
+    hr=_dim,
+    list_bullet=_cyan,
+    bold=_bold,
+    italic=_italic,
+    strikethrough=_strikethrough,
+    underline=_underline,
+    highlight_code=_highlight_code,
+)
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+COMMANDS: dict[str, str] = {
+    "login": "Authenticate with a provider",
+    "model": "Select a model",
+    "clear": "Clear chat history",
+    "help": "Show available commands",
+    "quit": "Exit",
 }
 
-_QUIT_ALIASES = ("/quit", "/exit", "/q")
-
-_completer = WordCompleter(list(COMMANDS.keys()), meta_dict=COMMANDS, sentence=True)
-
-_style = Style.from_dict({
-    "completion-menu": "bg:default default",
-    "completion-menu.completion": "bg:default default",
-    "completion-menu.completion.current": "bg:default bold",
-    "completion-menu.meta.completion": "bg:default #888888",
-    "completion-menu.meta.completion.current": "bg:default #888888 bold",
-    "scrollbar.background": "bg:default",
-    "scrollbar.button": "bg:default",
-    "bottom-toolbar": "bg:default #888888 noreverse",
-})
-
-
-# -- Helpers ------------------------------------------------------------------
-
-
-def _clear_line() -> None:
-    sys.stdout.write("\033[A\033[K")
-    sys.stdout.flush()
-
-
-def _build_toolbar(agent: Agent | None) -> HTML:
-    status = f"{agent.model_name} ({agent.provider_name})" if agent else "no model selected"
-    return HTML(f"<b>{status}</b>  ·  /help for commands")
-
-
-async def _pick(options: list[str]) -> str | None:
-    if not options:
-        print("\033[31mNo options available.\033[0m")
-        return None
-
-    def _fuzzy_match(text: str, target: str) -> bool:
-        it = iter(target.lower())
-        return all(ch in it for ch in text.lower())
-
-    class _ListCompleter(Completer):
-        def get_completions(self, document: Document, complete_event):
-            text = document.text_before_cursor
-            for opt in options:
-                if _fuzzy_match(text, opt):
-                    yield Completion(opt, start_position=-len(text))
-
-    kb = KeyBindings()
-
-    @kb.add(Keys.Escape, eager=True)
-    def _(event):
-        event.app.exit(exception=EOFError)
-
-    picker = PromptSession(completer=_ListCompleter(), key_bindings=kb, style=_style)
-    picker.app.ttimeoutlen = 0.0
-    picker.default_buffer.on_text_changed += lambda buf: buf.start_completion()
-    try:
-        return await picker.prompt_async(
-            "> ",
-            validator=Validator.from_callable(
-                lambda t: t in options,
-                error_message="Not a valid option. Use Tab to see choices.",
-            ),
-            validate_while_typing=False,
-            complete_while_typing=True,
-            pre_run=picker.default_buffer.start_completion,
-        )
-    except (EOFError, KeyboardInterrupt):
-        _clear_line()
-        return None
+_QUIT_ALIASES = ("quit", "exit", "q")
 
 
 def _resolve_command(cmd: str) -> str:
-    if cmd in COMMANDS or cmd in _QUIT_ALIASES:
-        return cmd
-    all_cmds = set(COMMANDS) | set(_QUIT_ALIASES)
-    matches = [c for c in all_cmds if c.startswith(cmd)]
-    return matches[0] if len(matches) == 1 else cmd
+    name = cmd.lstrip("/").lower()
+    if name in COMMANDS or name in _QUIT_ALIASES:
+        return name
+    matches = [c for c in (set(COMMANDS) | set(_QUIT_ALIASES)) if c.startswith(name)]
+    return matches[0] if len(matches) == 1 else name
 
 
-# -- Commands -----------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# App state
+# ---------------------------------------------------------------------------
 
 
-async def _cmd_login(agent: Agent | None) -> Agent | None:
-    name = await _pick(get_providers())
-    if not name:
-        return agent
-    await get_provider(name).authenticate(lambda result: print(result))
-    print(f"\033[32mAuthenticated with {name}.\033[0m")
-    return agent
+class MiniApp:
+    """Manages the TUI app lifecycle."""
+
+    def __init__(self) -> None:
+        self.agent: Agent | None = None
+        self.terminal = ProcessTerminal()
+        self.tui = TUI(self.terminal)
+        self._messages_container = self.tui  # add messages directly to TUI
+        self._editor: Editor | None = None
+        self._status_bar: TruncatedText | None = None
+        self._awaiting_response = False
+
+    def _build_status(self) -> str:
+        if self.agent:
+            return f"{_dim(self.agent.model_name)} {_dim('·')} {_dim(self.agent.provider_name)}"
+        return _dim("no model selected — /model to choose")
+
+    def _setup_ui(self) -> None:
+        # Status bar at bottom (will be re-added after messages)
+        self._status_bar = TruncatedText(self._build_status())
+
+        # Slash commands for autocomplete
+        slash_commands = [
+            SlashCommand(name=name, description=desc)
+            for name, desc in COMMANDS.items()
+        ]
+        autocomplete = CombinedAutocompleteProvider(commands=slash_commands)
+
+        # Editor
+        self._editor = Editor(
+            self.tui, _editor_theme,
+            EditorOptions(padding_x=0, autocomplete_max_visible=5),
+        )
+        self._editor.set_autocomplete_provider(autocomplete)
+        self._editor.on_submit = self._on_submit
+
+        # Build layout
+        self.tui.add_child(Text(_bold(_cyan("Agent 007")) + " — mini mode", padding_x=0, padding_y=0))
+        self.tui.add_child(Spacer(1))
+        self.tui.add_child(self._status_bar)
+        self.tui.add_child(Spacer(1))
+        self.tui.add_child(self._editor)
+
+        self.tui.set_focus(self._editor)
+
+    def _update_status(self) -> None:
+        if self._status_bar:
+            self._status_bar = TruncatedText(self._build_status())
+            # Replace the status bar in children (index 2)
+            if len(self.tui.children) > 2:
+                self.tui.children[2] = self._status_bar
+            self.tui.request_render()
+
+    def _add_message(self, component: object) -> None:
+        """Insert a component before the editor (2nd-to-last child)."""
+        idx = len(self.tui.children) - 1  # before editor
+        self.tui.children.insert(idx, component)  # type: ignore[arg-type]
+        self.tui.request_render()
+
+    def _on_submit(self, text: str) -> None:
+        text = text.strip()
+        if not text:
+            return
+
+        if self._editor:
+            self._editor.add_to_history(text)
+
+        # Handle slash commands
+        if text.startswith("/"):
+            cmd = _resolve_command(text)
+            if cmd in _QUIT_ALIASES:
+                self.tui.stop()
+                return
+            elif cmd == "clear":
+                if self.agent:
+                    self.agent.clear_history()
+                # Remove all children except title, spacer, status, spacer, editor
+                self.tui.children[:] = self.tui.children[:2] + self.tui.children[-3:]
+                self._add_message(Text(_dim("History cleared."), padding_x=1, padding_y=0))
+                self.tui.request_render()
+                return
+            elif cmd == "login":
+                asyncio.ensure_future(self._cmd_login())
+                return
+            elif cmd == "model":
+                asyncio.ensure_future(self._cmd_model())
+                return
+            elif cmd == "help":
+                help_lines = [_bold("Commands:")]
+                for c, desc in COMMANDS.items():
+                    help_lines.append(f"  {_cyan(f'/{c:<8}')} — {desc}")
+                self._add_message(Text("\n".join(help_lines), padding_x=1, padding_y=0))
+                self._add_message(Spacer(1))
+                return
+            else:
+                self._add_message(
+                    Text(_red(f"Unknown command: {text}"), padding_x=1, padding_y=0)
+                )
+                self._add_message(Spacer(1))
+                return
+
+        # Chat message
+        if not self.agent:
+            self._add_message(
+                Text(_red("❌ Please select a model first (/model)"), padding_x=1, padding_y=0)
+            )
+            self._add_message(Spacer(1))
+            return
+
+        # Show user message
+        self._add_message(Text(_dim("> ") + text, padding_x=1, padding_y=0))
+        self._add_message(Spacer(1))
+
+        asyncio.ensure_future(self._stream_response(text))
+
+    async def _stream_response(self, user_text: str) -> None:
+        if not self.agent or self._awaiting_response:
+            return
+        self._awaiting_response = True
+
+        # Add loader
+        loader = Loader(self.tui, _cyan, _dim, "Thinking...")
+        self._add_message(loader)
+
+        # Add markdown component (will be updated during streaming)
+        md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
+        self._add_message(md)
+
+        try:
+            def stream_handler(update: str) -> None:
+                loader.stop()
+                # Remove loader if still present
+                if loader in self.tui.children:
+                    self.tui.children.remove(loader)
+                md.set_text(update)
+                self.tui.request_render()
+
+            await self.agent.stream(user_text, stream_handler)
+
+        except Exception as e:
+            logger.exception("Error during agent stream")
+            loader.stop()
+            if loader in self.tui.children:
+                self.tui.children.remove(loader)
+            md.set_text(_red(f"❌ {e}"))
+            self.tui.request_render()
+        finally:
+            loader.stop()
+            if loader in self.tui.children:
+                self.tui.children.remove(loader)
+            self._awaiting_response = False
+            self._add_message(Spacer(1))
+            self.tui.request_render()
+
+    async def _cmd_login(self) -> None:
+        providers = get_providers()
+        if not providers:
+            self._add_message(Text(_red("No providers available."), padding_x=1, padding_y=0))
+            self._add_message(Spacer(1))
+            return
+
+        items = [SelectItem(value=p, label=p) for p in providers]
+        select = SelectList(items, 5, _select_list_theme)
+
+        done_event = asyncio.Event()
+        selected_provider: str | None = None
+
+        def on_select(item: SelectItem) -> None:
+            nonlocal selected_provider
+            selected_provider = item.value
+            self.tui.hide_overlay()
+            done_event.set()
+
+        def on_cancel() -> None:
+            self.tui.hide_overlay()
+            done_event.set()
+
+        select.on_select = on_select
+        select.on_cancel = on_cancel
+
+        self.tui.show_overlay(select)  # type: ignore[arg-type]
+        await done_event.wait()
+
+        if selected_provider:
+            try:
+                await get_provider(selected_provider).authenticate(
+                    lambda result: None
+                )
+                self._add_message(
+                    Text(_green(f"Authenticated with {selected_provider}."), padding_x=1, padding_y=0)
+                )
+            except Exception as e:
+                self._add_message(Text(_red(f"Auth failed: {e}"), padding_x=1, padding_y=0))
+            self._add_message(Spacer(1))
+
+    async def _cmd_model(self) -> None:
+        options: dict[str, tuple[str, str]] = {}
+        for pname in get_providers():
+            provider = get_provider(pname)
+            if not provider.is_authenticated():
+                continue
+            for model_id in provider.get_models():
+                options[f"{model_id} ({pname})"] = (model_id, pname)
+
+        if not options:
+            self._add_message(
+                Text(_red("No models available. Login first (/login)."), padding_x=1, padding_y=0)
+            )
+            self._add_message(Spacer(1))
+            return
+
+        items = [SelectItem(value=key, label=key) for key in options]
+        select = SelectList(items, 8, _select_list_theme)
+
+        done_event = asyncio.Event()
+        selected_key: str | None = None
+
+        def on_select(item: SelectItem) -> None:
+            nonlocal selected_key
+            selected_key = item.value
+            self.tui.hide_overlay()
+            done_event.set()
+
+        def on_cancel() -> None:
+            self.tui.hide_overlay()
+            done_event.set()
+
+        select.on_select = on_select
+        select.on_cancel = on_cancel
+
+        self.tui.show_overlay(select)  # type: ignore[arg-type]
+        await done_event.wait()
+
+        if selected_key and selected_key in options:
+            model_id, provider_name = options[selected_key]
+            try:
+                model = await get_provider(provider_name).build_model(model_id)
+                if self.agent:
+                    self.agent.set_model(model)
+                else:
+                    self.agent = Agent(model)
+                state.set("provider", provider_name)
+                state.set("model", model_id)
+                self._add_message(
+                    Text(_green(f"Switched to {model_id} ({provider_name})."), padding_x=1, padding_y=0)
+                )
+                self._update_status()
+            except Exception as e:
+                self._add_message(Text(_red(f"Failed: {e}"), padding_x=1, padding_y=0))
+            self._add_message(Spacer(1))
+
+    async def run(self) -> None:
+        # Restore saved model
+        model_id = state.get("model")
+        provider_name = state.get("provider")
+        if model_id and provider_name:
+            try:
+                model = await get_provider(provider_name).build_model(model_id)
+                self.agent = Agent(model)
+            except Exception:
+                pass
+
+        self._setup_ui()
+        self.tui.start()
+
+        # Keep running until TUI stops
+        try:
+            while not self.tui.stopped:
+                await asyncio.sleep(0.1)
+        except (KeyboardInterrupt, EOFError):
+            pass
+        finally:
+            if not self.tui.stopped:
+                self.tui.stop()
 
 
-async def _cmd_model(agent: Agent | None) -> Agent | None:
-    options: dict[str, tuple[str, str]] = {}
-    for pname in get_providers():
-        provider = get_provider(pname)
-        if not provider.is_authenticated():
-            continue
-        for model_id in provider.get_models():
-            options[f"{model_id} ({pname})"] = (model_id, pname)
-
-    if not options:
-        print("\033[31mNo models available. Login first.\033[0m")
-        return agent
-
-    pick = await _pick(list(options))
-    if pick is None:
-        return agent
-    model_id, provider_name = options[pick]
-
-    model = await get_provider(provider_name).build_model(model_id)
-    if agent:
-        agent.set_model(model)
-    else:
-        agent = Agent(model)
-    state.set("provider", provider_name)
-    state.set("model", model_id)
-    print(f"\033[32mSwitched to {model_id} ({provider_name}).\033[0m")
-    return agent
-
-
-async def _stream_response(agent: Agent, user_text: str) -> None:
-    try:
-        rendered_chars = 0
-
-        def stream_handler(update: str) -> None:
-            nonlocal rendered_chars
-            chunk = update[rendered_chars:]
-            rendered_chars = len(update)
-            sys.stdout.write(chunk)
-            sys.stdout.flush()
-
-        await agent.stream(user_text, stream_handler)
-        sys.stdout.write("\n")
-        sys.stdout.flush()
-    except Exception as e:
-        logger.exception("Error during agent stream")
-        print(f"\033[31m❌ {e}\033[0m")
-
-
-# -- Main loop ---------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Entry points
+# ---------------------------------------------------------------------------
 
 
 async def main() -> None:
-    print("\033[1;36mAgent 007\033[0m — mini mode\n")
-
-    agent: Agent | None = None
-
-    model_id = state.get("model")
-    provider_name = state.get("provider")
-    if model_id and provider_name:
-        try:
-            model = await get_provider(provider_name).build_model(model_id)
-            agent = Agent(model)
-            print(f"Model: \033[32m{model_id}\033[0m ({provider_name})")
-        except Exception:
-            print("\033[33mCould not restore saved model.\033[0m")
-
-    print("\033[2mType /help for commands.\033[0m\n")
-
-    session: PromptSession[str] = PromptSession(completer=_completer, style=_style)
-
-    while True:
-        try:
-            user_text = await session.prompt_async(
-                "> ",
-                bottom_toolbar=lambda: _build_toolbar(agent),
-            )
-        except (EOFError, KeyboardInterrupt):
-            _clear_line()
-            break
-
-        user_text = user_text.strip()
-        if not user_text:
-            _clear_line()
-            continue
-
-        if user_text.startswith("/"):
-            _clear_line()
-            cmd = _resolve_command(user_text.lower())
-            if cmd in _QUIT_ALIASES:
-                break
-            elif cmd == "/clear":
-                if agent:
-                    agent.clear_history()
-                sys.stdout.write("\033[2J\033[H")
-                sys.stdout.flush()
-                print("\033[2mHistory cleared.\033[0m")
-            elif cmd == "/login":
-                agent = await _cmd_login(agent)
-            elif cmd == "/model":
-                agent = await _cmd_model(agent)
-            elif cmd == "/help":
-                print("\033[1mCommands:\033[0m")
-                for c, desc in COMMANDS.items():
-                    print(f"  \033[36m{c:<8}\033[0m — {desc}")
-            else:
-                print(f"\033[31mUnknown command: {user_text}\033[0m")
-            continue
-
-        if not agent:
-            print("\033[31m❌ Please select a model first (/model)\033[0m")
-            continue
-
-        await _stream_response(agent, user_text)
-        print()
+    app = MiniApp()
+    await app.run()
 
 
 def run() -> None:
