@@ -826,8 +826,12 @@ class TUI(Container):
         # Move to column (1-indexed in ANSI)
         buf.append(f"\r\x1b[{target_col}C")
 
-        # Show cursor so IME overlay is visible
-        buf.append("\x1b[?25h")
+        # Keep hardware cursor hidden — components render a fake (inverse-video)
+        # cursor themselves.  Showing the terminal cursor here causes a doubled
+        # cursor artifact and intermittent disappearance during differential
+        # redraws.  The cursor position is still set so that IME overlays
+        # appear at the correct location.
+        buf.append("\x1b[?25l")
 
         self.hardware_cursor_row = target_row
         self.cursor_row = target_row
