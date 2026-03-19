@@ -15,6 +15,7 @@ import re
 
 from app.tui.keys import is_key_release, matches_key
 from app.tui.terminal import Terminal
+from app.tui.terminal_image import is_image_line
 from app.tui.utils import extract_segments, visible_width
 
 logger = logging.getLogger(__name__)
@@ -262,11 +263,30 @@ class TUI(Container):
         self.overlay_stack: list[_OverlayEntry] = []
         self.focus_order_counter: int = 0
 
+        # Input listeners
+        self._input_listeners: list[Callable[[str], None]] = []
+
+        # Debug callback
+        self.on_debug: Callable[[str], None] | None = None
+
+        # Config flags
+        self.show_hardware_cursor: bool = True
+        self.clear_on_shrink: bool = False
+
         self.stopped: bool = False
 
     # ------------------------------------------------------------------
     # Focus management
     # ------------------------------------------------------------------
+
+    def add_input_listener(self, listener: Callable[[str], None]) -> None:
+        self._input_listeners.append(listener)
+
+    def remove_input_listener(self, listener: Callable[[str], None]) -> None:
+        try:
+            self._input_listeners.remove(listener)
+        except ValueError:
+            pass
 
     def set_focus(self, component: Component | None) -> None:
         """Set focus to *component*, clearing the previous focus."""
@@ -307,12 +327,26 @@ class TUI(Container):
         self.request_render()
         return handle
 
-    def hide_overlay(self) -> None:
-        """Pop the topmost overlay and restore focus."""
+    def hide_overlay(self, handle: OverlayHandle | None = None) -> None:
+        """Remove an overlay and restore focus.
+
+        If *handle* is given, remove that specific overlay entry.
+        Otherwise pop the topmost overlay (existing behaviour).
+        """
         if not self.overlay_stack:
             return
 
-        entry = self.overlay_stack.pop()
+        if handle is not None:
+            entry = None
+            for i, e in enumerate(self.overlay_stack):
+                if e.handle is handle:
+                    entry = self.overlay_stack.pop(i)
+                    break
+            if entry is None:
+                return
+        else:
+            entry = self.overlay_stack.pop()
+
         entry.handle.hide()
 
         if not entry.options.non_capturing:
@@ -396,6 +430,10 @@ class TUI(Container):
         if is_key_release(data):
             return
 
+        # Notify input listeners
+        for listener in self._input_listeners:
+            listener(data)
+
         # Global debug key (ctrl+shift+d) — no-op placeholder
         if matches_key(data, "ctrl+shift+d"):
             return
@@ -447,8 +485,10 @@ class TUI(Container):
         cursor_pos = self._extract_cursor_position(lines, height)
 
         # 4. Apply line resets — ensure ANSI state is clean at end of each line
+        #    Skip image lines to avoid corrupting graphics protocol sequences.
         for i, line in enumerate(lines):
-            lines[i] = line + _SEGMENT_RESET
+            if not is_image_line(line):
+                lines[i] = line + _SEGMENT_RESET
 
         # 5. Decide on rendering strategy
         # Matching the original pi-tui: widthChanged/heightChanged are true
@@ -475,7 +515,7 @@ class TUI(Container):
             else:
                 self.max_lines_rendered = max(self.max_lines_rendered, len(lines))
             self.previous_viewport_top = max(0, self.max_lines_rendered - height)
-            if cursor_pos is not None:
+            if cursor_pos is not None and self.show_hardware_cursor:
                 self._position_hardware_cursor(cursor_pos, len(lines))
             self.previous_lines = lines[:]
             self.previous_width = width
@@ -490,7 +530,10 @@ class TUI(Container):
 
         # Width or height changed — full clear + re-render
         if width_changed or height_changed:
-            full_render(True)
+            use_clear = True
+            if self.clear_on_shrink and height_changed and not width_changed:
+                use_clear = height < self.previous_height
+            full_render(use_clear)
             return
 
         # Differential update — find changed line range
@@ -541,7 +584,7 @@ class TUI(Container):
             self.max_lines_rendered = max(len(lines), self.max_lines_rendered)
 
         # Position hardware cursor for IME input
-        if cursor_pos is not None:
+        if cursor_pos is not None and self.show_hardware_cursor:
             self._position_hardware_cursor_buf(buf, cursor_pos, len(lines))
 
         buf.append("\x1b[?2026l")  # end synchronized output
@@ -695,6 +738,9 @@ class TUI(Container):
         total_width: int,
     ) -> str:
         """Splice *overlay_line* into *base_line* at column *start_col*."""
+        if is_image_line(base_line):
+            return base_line
+
         if start_col < 0:
             start_col = 0
 

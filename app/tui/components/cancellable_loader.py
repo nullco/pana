@@ -27,6 +27,14 @@ class CancellableLoader(Loader):
     def aborted(self) -> bool:
         return self._cancelled.is_set()
 
+    @property
+    def signal(self) -> asyncio.Event:
+        """Cancellation signal — equivalent to AbortController.signal."""
+        return self._cancelled
+
+    def reset(self) -> None:
+        self._cancelled = asyncio.Event()
+
     def handle_input(self, data: str) -> None:
         kb = get_editor_keybindings()
         if kb.matches(data, "selectCancel"):
@@ -35,4 +43,5 @@ class CancellableLoader(Loader):
                 self.on_abort()
 
     def dispose(self) -> None:
+        self._cancelled.set()
         self.stop()

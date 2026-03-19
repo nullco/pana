@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import os
+import re
 import signal
 import sys
 import termios
@@ -16,7 +17,8 @@ import tty
 from collections.abc import Callable
 from typing import Protocol
 
-from app.tui.keys import set_kitty_protocol_active  # noqa: F401 – future use
+from app.tui.keys import set_kitty_protocol_active
+from app.tui.stdin_buffer import StdinBuffer
 
 
 class Terminal(Protocol):
@@ -48,6 +50,11 @@ class Terminal(Protocol):
 
     def set_title(self, title: str) -> None: ...
 
+    @property
+    def kitty_protocol_active(self) -> bool: ...
+
+    async def drain_input(self, max_ms: float = 1000, idle_ms: float = 50) -> None: ...
+
 
 class ProcessTerminal:
     """Terminal backed by the hosting process's stdin/stdout."""
@@ -59,6 +66,14 @@ class ProcessTerminal:
         self._on_resize: Callable[[], None] | None = None
         self._prev_sigwinch: signal.Handlers | None = None
         self._stdin_fd: int | None = None
+        self._kitty_protocol_active: bool = False
+        self._modify_other_keys_active: bool = False
+        self._stdin_buffer: StdinBuffer | None = None
+        self._kitty_fallback_handle: asyncio.TimerHandle | None = None
+
+    @property
+    def kitty_protocol_active(self) -> bool:
+        return self._kitty_protocol_active
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -88,6 +103,10 @@ class ProcessTerminal:
         self._prev_sigwinch = signal.getsignal(signal.SIGWINCH)
         signal.signal(signal.SIGWINCH, self._handle_sigwinch)
 
+        # Stdin buffer with protocol negotiation
+        self._setup_stdin_buffer()
+        self._query_and_enable_kitty_protocol()
+
         # Async stdin reader
         loop = asyncio.get_running_loop()
         loop.add_reader(fd, self._read_stdin)
@@ -95,6 +114,27 @@ class ProcessTerminal:
     def stop(self) -> None:
         fd = self._stdin_fd
         if fd is not None:
+            # Cancel pending Kitty fallback timer
+            if self._kitty_fallback_handle is not None:
+                self._kitty_fallback_handle.cancel()
+                self._kitty_fallback_handle = None
+
+            # Disable Kitty protocol if active
+            if self._kitty_protocol_active:
+                self.write("\x1b[<u")
+                self._kitty_protocol_active = False
+                set_kitty_protocol_active(False)
+
+            # Disable modifyOtherKeys if active
+            if self._modify_other_keys_active:
+                self.write("\x1b[>4;0m")
+                self._modify_other_keys_active = False
+
+            # Destroy stdin buffer
+            if self._stdin_buffer is not None:
+                self._stdin_buffer.destroy()
+                self._stdin_buffer = None
+
             # Remove async reader
             try:
                 loop = asyncio.get_running_loop()
@@ -189,4 +229,77 @@ class ProcessTerminal:
         except (OSError, BlockingIOError):
             return
         if data:
-            self._on_input(data.decode("utf-8", errors="replace"))
+            text = data.decode("utf-8", errors="replace")
+            if self._stdin_buffer is not None:
+                self._stdin_buffer.process(text)
+            else:
+                self._on_input(text)
+
+    def _setup_stdin_buffer(self) -> None:
+        buf = StdinBuffer(timeout_ms=10)
+        kitty_response_re = re.compile(r"^\x1b\[\?(\d+)u$")
+
+        def _on_data(data: str) -> None:
+            m = kitty_response_re.match(data)
+            if m and not self._kitty_protocol_active:
+                self._kitty_protocol_active = True
+                set_kitty_protocol_active(True)
+                self.write("\x1b[>7u")
+                return
+            if self._on_input is not None:
+                self._on_input(data)
+
+        def _on_paste(content: str) -> None:
+            if self._on_input is not None:
+                self._on_input("\x1b[200~" + content + "\x1b[201~")
+
+        buf.on_data = _on_data
+        buf.on_paste = _on_paste
+        self._stdin_buffer = buf
+
+    def _query_and_enable_kitty_protocol(self) -> None:
+        # Query terminal for Kitty keyboard protocol support
+        self.write("\x1b[?u")
+
+        def _fallback() -> None:
+            self._kitty_fallback_handle = None
+            if not self._kitty_protocol_active and not self._modify_other_keys_active:
+                self.write("\x1b[>4;2m")
+                self._modify_other_keys_active = True
+
+        loop = asyncio.get_event_loop()
+        self._kitty_fallback_handle = loop.call_later(0.15, _fallback)
+
+    async def drain_input(self, max_ms: float = 1000, idle_ms: float = 50) -> None:
+        # Disable keyboard protocol enhancements
+        if self._kitty_protocol_active:
+            self.write("\x1b[<u")
+            self._kitty_protocol_active = False
+            set_kitty_protocol_active(False)
+        if self._modify_other_keys_active:
+            self.write("\x1b[>4;0m")
+            self._modify_other_keys_active = False
+
+        # Silence input handler while draining
+        saved_handler = self._on_input
+        self._on_input = None
+        try:
+            elapsed = 0.0
+            slice_ms = min(idle_ms, 10)
+            last_activity = 0.0
+            while elapsed < max_ms:
+                await asyncio.sleep(slice_ms / 1000)
+                elapsed += slice_ms
+                # Check if any data arrived (read and discard)
+                if self._stdin_fd is not None:
+                    try:
+                        data = os.read(self._stdin_fd, 4096)
+                        if data:
+                            last_activity = elapsed
+                            continue
+                    except (OSError, BlockingIOError):
+                        pass
+                if elapsed - last_activity >= idle_ms:
+                    break
+        finally:
+            self._on_input = saved_handler
