@@ -157,7 +157,7 @@ class SelectList:
             lines.append(line)
 
         if total > self._max_visible:
-            info = f" ({self._selected_index + 1}/{total})"
+            info = f"  ({self._selected_index + 1}/{total})"
             lines.append(self._theme.scroll_info(info))
 
         return lines

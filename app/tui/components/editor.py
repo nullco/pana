@@ -376,6 +376,7 @@ class Editor:
                 if sel and self._autocomplete_provider:
                     self._push_undo()
                     self._last_action = None
+                    is_slash_cmd = self._autocomplete_prefix.startswith("/")
                     r = self._autocomplete_provider.apply_completion(
                         self._lines, self._cursor_line, self._cursor_col,
                         sel, self._autocomplete_prefix,
@@ -386,6 +387,9 @@ class Editor:
                     self._cancel_autocomplete()
                     if self.on_change:
                         self.on_change(self.get_text())
+                    # Chain into argument completions for slash commands
+                    if is_slash_cmd:
+                        self._try_trigger_autocomplete()
                 return
             if kb.matches(data, "selectConfirm"):
                 sel = self._autocomplete_list.get_selected_item()
@@ -703,6 +707,10 @@ class Editor:
 
         if self._autocomplete_state:
             self._update_autocomplete()
+        else:
+            before = self._lines[self._cursor_line][:self._cursor_col]
+            if self._is_in_slash_context(before) or re.search(r"(?:^|[\s])@[^\s]*$", before):
+                self._try_trigger_autocomplete()
 
     def _handle_forward_delete(self) -> None:
         self._history_index = -1
@@ -722,6 +730,13 @@ class Editor:
             del self._lines[self._cursor_line + 1]
         if self.on_change:
             self.on_change(self.get_text())
+
+        if self._autocomplete_state:
+            self._update_autocomplete()
+        else:
+            before = self._lines[self._cursor_line][:self._cursor_col]
+            if self._is_in_slash_context(before) or re.search(r"(?:^|[\s])@[^\s]*$", before):
+                self._try_trigger_autocomplete()
 
     def _delete_to_start(self) -> None:
         self._history_index = -1
@@ -1074,12 +1089,18 @@ class Editor:
                 no_match=self._theme.select_list.no_match,
             )
             self._autocomplete_list = SelectList(items, self._autocomplete_max_visible, theme)
+            best = self._get_best_autocomplete_match_index(sugs["items"], sugs["prefix"])
+            if best > 0:
+                self._autocomplete_list.set_selected_index(best)
             self._autocomplete_state = "regular"
         else:
             self._cancel_autocomplete()
 
     def _update_autocomplete(self) -> None:
         if not self._autocomplete_state or not self._autocomplete_provider:
+            return
+        if self._autocomplete_state == "force":
+            self._force_file_autocomplete(is_update=True)
             return
         sugs = self._autocomplete_provider.get_suggestions(
             self._lines, self._cursor_line, self._cursor_col
@@ -1100,6 +1121,9 @@ class Editor:
                 no_match=self._theme.select_list.no_match,
             )
             self._autocomplete_list = SelectList(items, self._autocomplete_max_visible, theme)
+            best = self._get_best_autocomplete_match_index(sugs["items"], sugs["prefix"])
+            if best > 0:
+                self._autocomplete_list.set_selected_index(best)
         else:
             self._cancel_autocomplete()
 
@@ -1118,4 +1142,65 @@ class Editor:
         if self._is_in_slash_context(before) and " " not in before.lstrip():
             self._try_trigger_autocomplete()
         else:
-            self._try_trigger_autocomplete()
+            self._force_file_autocomplete()
+
+    def _force_file_autocomplete(self, *, is_update: bool = False) -> None:
+        provider = self._autocomplete_provider
+        if not provider:
+            return
+        get_force = getattr(provider, "get_force_file_suggestions", None)
+        if not get_force:
+            return
+        sugs = get_force(self._lines, self._cursor_line, self._cursor_col)
+        if not sugs or not sugs["items"]:
+            if is_update:
+                self._cancel_autocomplete()
+            return
+        # Single result on initial trigger: auto-apply without showing the menu
+        if len(sugs["items"]) == 1 and not is_update:
+            from app.tui.autocomplete import AutocompleteItem
+            item = sugs["items"][0]
+            if isinstance(item, dict):
+                item = AutocompleteItem(value=item["value"], label=item["label"], description=item.get("description"))
+            self._push_undo()
+            self._last_action = None
+            r = provider.apply_completion(
+                self._lines, self._cursor_line, self._cursor_col,
+                item, sugs["prefix"],
+            )
+            self._lines = r["lines"]
+            self._cursor_line = r["cursor_line"]
+            self._set_cursor_col(r["cursor_col"])
+            if self.on_change:
+                self.on_change(self.get_text())
+            return
+        # Multiple results: show menu in force mode
+        self._autocomplete_prefix = sugs["prefix"]
+        from app.tui.components.select_list import SelectItem, SelectList, SelectListTheme as SLT
+        items = [
+            SelectItem(value=it.value, label=it.label, description=it.description)
+            for it in sugs["items"]
+        ]
+        theme = SLT(
+            selected_prefix=self._theme.select_list.selected_prefix,
+            selected_text=self._theme.select_list.selected_text,
+            description=self._theme.select_list.description,
+            scroll_info=self._theme.select_list.scroll_info,
+            no_match=self._theme.select_list.no_match,
+        )
+        self._autocomplete_list = SelectList(items, self._autocomplete_max_visible, theme)
+        best = self._get_best_autocomplete_match_index(sugs["items"], sugs["prefix"])
+        if best > 0:
+            self._autocomplete_list.set_selected_index(best)
+        self._autocomplete_state = "force"
+
+    def _get_best_autocomplete_match_index(self, items: list, prefix: str) -> int:
+        for i, item in enumerate(items):
+            val = item.value if hasattr(item, "value") else item["value"]
+            if val == prefix:
+                return i
+        for i, item in enumerate(items):
+            val = item.value if hasattr(item, "value") else item["value"]
+            if val.startswith(prefix):
+                return i
+        return 0

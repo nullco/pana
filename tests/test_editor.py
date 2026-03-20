@@ -1,12 +1,14 @@
 """Tests for the Editor component.
 
 Covers prompt history navigation, public state accessors, Unicode text
-editing, kill ring, undo, character jump (Ctrl+]), and word wrapping.
+editing, kill ring, undo, character jump (Ctrl+]), word wrapping,
+and autocomplete behaviour.
 """
 from __future__ import annotations
 
 from typing import Callable
 
+from app.tui.autocomplete import AutocompleteItem, CombinedAutocompleteProvider, SlashCommand
 from app.tui.tui import TUI
 from app.tui.components.editor import Editor, EditorTheme, SelectListTheme, EditorOptions, word_wrap_line
 
@@ -94,6 +96,7 @@ def _make_editor(text: str = "", width: int = 80, rows: int = 24) -> Editor:
 
 
 # Key sequences
+_TAB = "\t"
 _UP = "\x1b[A"
 _DOWN = "\x1b[B"
 _LEFT = "\x1b[D"
@@ -451,3 +454,227 @@ class TestWordWrapping:
         chunks = word_wrap_line("", 10)
         assert len(chunks) == 1
         assert chunks[0]["text"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Mock autocomplete provider for testing
+# ---------------------------------------------------------------------------
+
+
+class _MockAutocompleteProvider:
+    """Configurable mock that supports both regular and force-file suggestions."""
+
+    def __init__(
+        self,
+        suggestions_fn=None,
+        force_fn=None,
+    ) -> None:
+        self._suggestions_fn = suggestions_fn
+        self._force_fn = force_fn
+
+    def get_suggestions(self, lines, cursor_line, cursor_col):
+        if self._suggestions_fn:
+            return self._suggestions_fn(lines, cursor_line, cursor_col)
+        return None
+
+    def get_force_file_suggestions(self, lines, cursor_line, cursor_col):
+        if self._force_fn:
+            return self._force_fn(lines, cursor_line, cursor_col)
+        return None
+
+    def apply_completion(self, lines, cursor_line, cursor_col, item, prefix):
+        current_line = lines[cursor_line] if cursor_line < len(lines) else ""
+        before_prefix = current_line[: cursor_col - len(prefix)]
+        after_cursor = current_line[cursor_col:]
+        new_line = f"{before_prefix}{item.value}{after_cursor}"
+        new_lines = list(lines)
+        new_lines[cursor_line] = new_line
+        return {
+            "lines": new_lines,
+            "cursor_line": cursor_line,
+            "cursor_col": len(before_prefix) + len(item.value),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Autocomplete
+# ---------------------------------------------------------------------------
+
+
+class TestAutocomplete:
+    def test_auto_applies_single_force_file_suggestion(self) -> None:
+        editor = _make_editor()
+
+        def force_fn(lines, _cl, cc):
+            text = lines[0] or ""
+            prefix = text[:cc]
+            if prefix == "Work":
+                return {
+                    "items": [AutocompleteItem(value="Workspace/", label="Workspace/")],
+                    "prefix": "Work",
+                }
+            return None
+
+        provider = _MockAutocompleteProvider(force_fn=force_fn)
+        editor.set_autocomplete_provider(provider)
+
+        _type_text(editor, "Work")
+        assert editor.get_text() == "Work"
+
+        editor.handle_input(_TAB)
+        assert editor.get_text() == "Workspace/"
+        assert not editor.is_showing_autocomplete()
+
+        # Undo restores pre-completion text
+        editor.handle_input(_UNDO)
+        assert editor.get_text() == "Work"
+
+    def test_shows_menu_when_force_file_has_multiple_suggestions(self) -> None:
+        editor = _make_editor()
+
+        def force_fn(lines, _cl, cc):
+            text = lines[0] or ""
+            prefix = text[:cc]
+            if prefix == "src":
+                return {
+                    "items": [
+                        AutocompleteItem(value="src/", label="src/"),
+                        AutocompleteItem(value="src.txt", label="src.txt"),
+                    ],
+                    "prefix": "src",
+                }
+            return None
+
+        provider = _MockAutocompleteProvider(force_fn=force_fn)
+        editor.set_autocomplete_provider(provider)
+
+        _type_text(editor, "src")
+        editor.handle_input(_TAB)
+        assert editor.get_text() == "src"
+        assert editor.is_showing_autocomplete()
+
+        # Second Tab accepts first suggestion
+        editor.handle_input(_TAB)
+        assert editor.get_text() == "src/"
+        assert not editor.is_showing_autocomplete()
+
+    def test_keeps_suggestions_open_when_typing_in_force_mode(self) -> None:
+        editor = _make_editor()
+
+        all_files = [
+            AutocompleteItem(value="readme.md", label="readme.md"),
+            AutocompleteItem(value="package.json", label="package.json"),
+            AutocompleteItem(value="src/", label="src/"),
+            AutocompleteItem(value="dist/", label="dist/"),
+        ]
+
+        def force_fn(lines, _cl, cc):
+            text = lines[0] or ""
+            prefix = text[:cc]
+            filtered = [f for f in all_files if f.value.lower().startswith(prefix.lower())]
+            return {"items": filtered, "prefix": prefix} if filtered else None
+
+        provider = _MockAutocompleteProvider(force_fn=force_fn)
+        editor.set_autocomplete_provider(provider)
+
+        # Tab on empty prompt → force mode, shows all 4 files
+        editor.handle_input(_TAB)
+        assert editor.is_showing_autocomplete()
+
+        # Type "r" → narrows to "readme.md", stays open
+        editor.handle_input("r")
+        assert editor.get_text() == "r"
+        assert editor.is_showing_autocomplete()
+
+        # Type "e" → still open
+        editor.handle_input("e")
+        assert editor.get_text() == "re"
+        assert editor.is_showing_autocomplete()
+
+        # Tab accepts best match
+        editor.handle_input(_TAB)
+        assert editor.get_text() == "readme.md"
+        assert not editor.is_showing_autocomplete()
+
+    def test_hides_autocomplete_when_backspacing_slash_to_empty(self) -> None:
+        editor = _make_editor()
+
+        commands = [
+            AutocompleteItem(value="model", label="model", description="Change model"),
+            AutocompleteItem(value="help", label="help", description="Show help"),
+        ]
+
+        def sugs_fn(lines, _cl, cc):
+            text = lines[0] or ""
+            prefix = text[:cc]
+            if prefix.startswith("/"):
+                query = prefix[1:]
+                filtered = [c for c in commands if c.value.startswith(query)]
+                return {"items": filtered, "prefix": prefix} if filtered else None
+            return None
+
+        provider = _MockAutocompleteProvider(suggestions_fn=sugs_fn)
+        editor.set_autocomplete_provider(provider)
+
+        editor.handle_input("/")
+        assert editor.get_text() == "/"
+        assert editor.is_showing_autocomplete()
+
+        # Backspace deletes "/" → autocomplete must close
+        editor.handle_input(_BACKSPACE)
+        assert editor.get_text() == ""
+        assert not editor.is_showing_autocomplete()
+
+    def test_tab_chains_into_argument_completions_for_slash_commands(self) -> None:
+        editor = _make_editor()
+
+        def get_arg_completions(arg_text):
+            items = [
+                AutocompleteItem(value="claude-opus", label="claude-opus"),
+                AutocompleteItem(value="claude-sonnet", label="claude-sonnet"),
+            ]
+            return [i for i in items if i.value.startswith(arg_text)]
+
+        provider = CombinedAutocompleteProvider(
+            commands=[
+                SlashCommand(name="model", description="Switch model", get_argument_completions=get_arg_completions),
+                SlashCommand(name="help", description="Show help"),
+            ]
+        )
+        editor.set_autocomplete_provider(provider)
+
+        _type_text(editor, "/mod")
+        assert editor.is_showing_autocomplete()
+
+        # Tab completes "/mod" → "/model " AND immediately opens arg completions
+        editor.handle_input(_TAB)
+        assert editor.get_text() == "/model "
+        assert editor.is_showing_autocomplete()
+
+        # Tab accepts first argument
+        editor.handle_input(_TAB)
+        assert editor.get_text() == "/model claude-opus"
+        assert not editor.is_showing_autocomplete()
+
+    def test_tab_does_not_chain_when_command_has_no_arg_completer(self) -> None:
+        editor = _make_editor()
+
+        provider = CombinedAutocompleteProvider(
+            commands=[
+                SlashCommand(name="help", description="Show help"),
+                SlashCommand(
+                    name="model",
+                    description="Switch model",
+                    get_argument_completions=lambda t: [AutocompleteItem(value="claude-opus", label="claude-opus")],
+                ),
+            ]
+        )
+        editor.set_autocomplete_provider(provider)
+
+        _type_text(editor, "/he")
+        assert editor.is_showing_autocomplete()
+
+        # Tab completes "/he" → "/help " but no arg completions
+        editor.handle_input(_TAB)
+        assert editor.get_text() == "/help "
+        assert not editor.is_showing_autocomplete()
