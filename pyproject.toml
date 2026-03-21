@@ -1,16 +1,14 @@
 [project]
 name = "agent"
 version = "0.1.0"
-description = "A coding agent with TUI using Textual and pydantic-ai."
+description = "A coding agent with a minimalist TUI."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "textual",
     "pydantic-ai",
     "pyperclip>=1.11.0",
     "requests",
     "python-dotenv",
-    "textual-autocomplete>=4.0.6",
     "prompt-toolkit>=3.0",
 ]
 

@@ -1,6 +1,9 @@
 import logging
 import os
-from app.tui.app import app
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logging.basicConfig(
     level=os.getenv("AGENT_LOG_LEVEL", "INFO"),
@@ -9,4 +12,6 @@ logging.basicConfig(
 
 
 if __name__ == "__main__":
-    app.run()
+    from app.tui.mini import run
+
+    run()

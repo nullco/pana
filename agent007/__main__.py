@@ -14,7 +14,7 @@ logging.basicConfig(
     handlers=[logging.FileHandler(_log_file) if _log_file else logging.NullHandler()],
 )
 
-from app.tui.app import app
+from app.tui.mini import run
 
 if __name__ == "__main__":
-    app.run()
+    run()
