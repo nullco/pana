@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import sys
 
 from pygments import highlight as _pyg_highlight
@@ -192,12 +193,17 @@ class MiniApp:
         # Status bar at bottom (will be re-added after messages)
         self._status_bar = TruncatedText(self._build_status())
 
-        # Slash commands for autocomplete
+        # Detect fd for fuzzy file completion
+        fd_path = shutil.which("fd") or shutil.which("fdfind")
+
+        # Slash commands for autocomplete (name-only; commands use overlay pickers)
         slash_commands = [
             SlashCommand(name=name, description=desc)
             for name, desc in COMMANDS.items()
         ]
-        autocomplete = CombinedAutocompleteProvider(commands=slash_commands)
+        autocomplete = CombinedAutocompleteProvider(
+            commands=slash_commands, fd_path=fd_path,
+        )
 
         # Editor
         self._editor = Editor(
@@ -333,7 +339,7 @@ class MiniApp:
             return
 
         items = [SelectItem(value=p, label=p) for p in providers]
-        select = SelectList(items, 5, _select_list_theme)
+        select = SelectList(items, 5, _select_list_theme, searchable=True)
 
         done_event = asyncio.Event()
         selected_provider: str | None = None
@@ -383,7 +389,7 @@ class MiniApp:
             return
 
         items = [SelectItem(value=key, label=key) for key in options]
-        select = SelectList(items, 8, _select_list_theme)
+        select = SelectList(items, 8, _select_list_theme, searchable=True)
 
         done_event = asyncio.Event()
         selected_key: str | None = None

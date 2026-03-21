@@ -1,10 +1,12 @@
-"""Keyboard-navigable selection list component."""
+"""Keyboard-navigable selection list component with optional search filtering."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable
 
+from app.tui.fuzzy import fuzzy_filter
 from app.tui.keybindings import get_editor_keybindings
+from app.tui.keys import decode_kitty_printable
 from app.tui.utils import truncate_to_width, visible_width
 
 DEFAULT_PRIMARY_COLUMN_WIDTH = 32
@@ -41,6 +43,8 @@ class SelectList:
         max_visible: int,
         theme: SelectListTheme,
         layout: SelectListLayoutOptions | None = None,
+        *,
+        searchable: bool = False,
     ) -> None:
         self._items = list(items)
         self._max_visible = max_visible
@@ -50,6 +54,9 @@ class SelectList:
         self._filtered: list[SelectItem] = list(items)
         self._selected_index: int = 0
         self._scroll_offset: int = 0
+        self._searchable = searchable
+
+        self.focused: bool = False
 
         self.on_select: Callable[[SelectItem], None] | None = None
         self.on_cancel: Callable[[], None] | None = None
@@ -57,10 +64,12 @@ class SelectList:
 
     def set_filter(self, filter_text: str) -> None:
         self._filter = filter_text
-        lower = filter_text.lower()
-        self._filtered = [
-            item for item in self._items if item.value.lower().startswith(lower)
-        ]
+        if filter_text.strip():
+            self._filtered = fuzzy_filter(
+                self._items, filter_text, lambda item: item.label,
+            )
+        else:
+            self._filtered = list(self._items)
         self._selected_index = 0
         self._scroll_offset = 0
         if self.on_selection_change:
@@ -102,8 +111,22 @@ class SelectList:
         return desc.replace("\r\n", " ").replace("\n", " ")
 
     def render(self, width: int) -> list[str]:
+        result: list[str] = []
+
+        # Search input line
+        if self._searchable:
+            prompt = "> "
+            query_display = self._filter
+            avail = max(1, width - len(prompt))
+            query_display = truncate_to_width(query_display, avail)
+            cursor = "\x1b[7m \x1b[0m"
+            line = f"{prompt}{query_display}{cursor}"
+            pad = max(0, width - visible_width(prompt) - visible_width(query_display) - 1)
+            result.append(line + " " * pad)
+
         if not self._filtered:
-            return [self._theme.no_match("No matches")]
+            result.append(self._theme.no_match("  No matches"))
+            return result
 
         total = len(self._filtered)
 
@@ -160,7 +183,8 @@ class SelectList:
             info = f"  ({self._selected_index + 1}/{total})"
             lines.append(self._theme.scroll_info(info))
 
-        return lines
+        result.extend(lines)
+        return result
 
     def handle_input(self, data: str) -> None:
         kb = get_editor_keybindings()
@@ -171,25 +195,49 @@ class SelectList:
                     self.set_selected_index(len(self._filtered) - 1)
                 else:
                     self.set_selected_index(self._selected_index - 1)
-        elif kb.matches(data, "selectDown"):
+            return
+        if kb.matches(data, "selectDown"):
             if self._filtered:
                 if self._selected_index == len(self._filtered) - 1:
                     self.set_selected_index(0)
                 else:
                     self.set_selected_index(self._selected_index + 1)
-        elif kb.matches(data, "selectPageUp"):
+            return
+        if kb.matches(data, "selectPageUp"):
             if self._filtered:
                 self.set_selected_index(max(0, self._selected_index - self._max_visible))
-        elif kb.matches(data, "selectPageDown"):
+            return
+        if kb.matches(data, "selectPageDown"):
             if self._filtered:
                 self.set_selected_index(min(len(self._filtered) - 1, self._selected_index + self._max_visible))
-        elif kb.matches(data, "selectConfirm"):
+            return
+        if kb.matches(data, "selectConfirm") or kb.matches(data, "tab"):
             item = self.get_selected_item()
             if item and self.on_select:
                 self.on_select(item)
-        elif kb.matches(data, "selectCancel"):
+            return
+        if kb.matches(data, "selectCancel"):
             if self.on_cancel:
                 self.on_cancel()
+            return
+
+        # Text input for searchable lists
+        if self._searchable:
+            if kb.matches(data, "deleteCharBackward"):
+                if self._filter:
+                    self.set_filter(self._filter[:-1])
+                return
+            if kb.matches(data, "deleteToLineStart"):
+                self.set_filter("")
+                return
+
+            ch = decode_kitty_printable(data)
+            if ch is not None:
+                self.set_filter(self._filter + ch)
+                return
+            if data and len(data) == 1 and ord(data[0]) >= 32:
+                self.set_filter(self._filter + data)
+                return
 
     def invalidate(self) -> None:
         pass

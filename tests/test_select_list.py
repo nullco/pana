@@ -216,3 +216,67 @@ def test_scroll_indicator_shows_index_total_format() -> None:
     # Last line should be the scroll indicator
     assert lines[-1].strip().startswith("(")
     assert "1/10" in lines[-1]
+
+
+# ---------------------------------------------------------------------------
+# Tests: searchable mode
+# ---------------------------------------------------------------------------
+
+_BACKSPACE = "\x7f"
+
+
+def test_searchable_renders_search_input_line() -> None:
+    """Searchable list must render a search input line at the top."""
+    items = [SelectItem(value="a", label="alpha"), SelectItem(value="b", label="beta")]
+    sl = SelectList(items, 10, _THEME, searchable=True)
+    lines = sl.render(60)
+    assert lines[0].startswith("> ")
+
+
+def test_searchable_filters_by_typing() -> None:
+    """Typing characters must filter the list using fuzzy matching."""
+    items = [
+        SelectItem(value="alpha", label="alpha"),
+        SelectItem(value="beta", label="beta"),
+        SelectItem(value="gamma", label="gamma"),
+    ]
+    sl = SelectList(items, 10, _THEME, searchable=True)
+    sl.handle_input("b")
+    assert len(sl._filtered) == 1
+    assert sl._filtered[0].value == "beta"
+
+
+def test_searchable_backspace_widens_filter() -> None:
+    """Backspace must remove the last character and widen the filter."""
+    items = [
+        SelectItem(value="alpha", label="alpha"),
+        SelectItem(value="beta", label="beta"),
+    ]
+    sl = SelectList(items, 10, _THEME, searchable=True)
+    sl.handle_input("b")
+    assert len(sl._filtered) == 1
+    sl.handle_input(_BACKSPACE)
+    assert len(sl._filtered) == 2
+
+
+def test_searchable_shows_no_matches() -> None:
+    """When no items match, 'No matches' must be shown."""
+    items = [SelectItem(value="alpha", label="alpha")]
+    sl = SelectList(items, 10, _THEME, searchable=True)
+    sl.handle_input("z")
+    sl.handle_input("z")
+    sl.handle_input("z")
+    lines = sl.render(60)
+    assert any("No matches" in l for l in lines)
+
+
+def test_non_searchable_ignores_text_input() -> None:
+    """Non-searchable list must not react to character input."""
+    items = [
+        SelectItem(value="alpha", label="alpha"),
+        SelectItem(value="beta", label="beta"),
+    ]
+    sl = _make_list(items)
+    sl.handle_input("b")
+    # Should still show all items (no filtering)
+    assert len(sl._filtered) == 2
