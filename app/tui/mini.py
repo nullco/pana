@@ -26,7 +26,7 @@ from app.tui.components.spacer import Spacer
 from app.tui.components.text import Text
 from app.tui.components.truncated_text import TruncatedText
 from app.tui.terminal import ProcessTerminal
-from app.tui.tui import TUI
+from app.tui.tui import TUI, OverlayOptions
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +230,12 @@ class MiniApp:
                 self.tui.children[2] = self._status_bar
             self.tui.request_render()
 
+    def _overlay_options_below_editor(self) -> OverlayOptions:
+        """Return OverlayOptions that position an overlay just below the editor."""
+        prev = self.tui.previous_lines
+        row = len(prev) if prev else len(self.tui.render(self.terminal.columns or 80))
+        return OverlayOptions(row=row, col=0)
+
     def _add_message(self, component: object) -> None:
         """Insert a component before the editor (2nd-to-last child)."""
         idx = len(self.tui.children) - 1  # before editor
@@ -357,7 +363,8 @@ class MiniApp:
         select.on_select = on_select
         select.on_cancel = on_cancel
 
-        self.tui.show_overlay(select)  # type: ignore[arg-type]
+        opts = self._overlay_options_below_editor()
+        self.tui.show_overlay(select, opts)  # type: ignore[arg-type]
         await done_event.wait()
 
         if selected_provider:
@@ -407,7 +414,8 @@ class MiniApp:
         select.on_select = on_select
         select.on_cancel = on_cancel
 
-        self.tui.show_overlay(select)  # type: ignore[arg-type]
+        opts = self._overlay_options_below_editor()
+        self.tui.show_overlay(select, opts)  # type: ignore[arg-type]
         await done_event.wait()
 
         if selected_key and selected_key in options:
