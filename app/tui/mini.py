@@ -6,6 +6,7 @@ import asyncio
 import logging
 import shutil
 import sys
+from collections.abc import Callable
 
 from pygments import highlight as _pyg_highlight
 from pygments.formatters import TerminalTrueColorFormatter
@@ -26,7 +27,7 @@ from app.tui.components.select_list import SelectListTheme as SLTheme
 from app.tui.components.spacer import Spacer
 from app.tui.components.text import Text
 from app.tui.terminal import ProcessTerminal
-from app.tui.tui import TUI, Container, OverlayOptions
+from app.tui.tui import TUI, Container
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +184,7 @@ class MiniApp:
 
         TUI
         ├── chatContainer      (header + messages)
-        ├── editor
+        ├── editorContainer    (editor — swapped for selectors)
         └── footer             (cwd, model name right-aligned)
     """
 
@@ -192,6 +193,7 @@ class MiniApp:
         self.terminal = ProcessTerminal()
         self.tui = TUI(self.terminal)
         self._chat_container = Container()
+        self._editor_container = Container()
         self._editor: Editor | None = None
         self._footer: Footer | None = None
         self._awaiting_response = False
@@ -226,8 +228,10 @@ class MiniApp:
         )
         self._chat_container.add_child(Spacer(1))
 
+        self._editor_container.add_child(self._editor)
+
         self.tui.add_child(self._chat_container)
-        self.tui.add_child(self._editor)
+        self.tui.add_child(self._editor_container)
         self.tui.add_child(self._footer)
 
         self.tui.set_focus(self._editor)
@@ -240,11 +244,23 @@ class MiniApp:
                 self._footer.set_model(None, None)
             self.tui.request_render()
 
-    def _overlay_options_below_editor(self) -> OverlayOptions:
-        """Return OverlayOptions that position an overlay just below the editor."""
-        prev = self.tui.previous_lines
-        row = len(prev) if prev else len(self.tui.render(self.terminal.columns or 80))
-        return OverlayOptions(row=row, col=0)
+    def _show_selector(self, component: object, focus_target: object | None = None) -> Callable[[], None]:
+        """Replace the editor with a selector component, matching the original pi-tui pattern.
+
+        Returns a ``done`` callback that restores the editor.
+        """
+        self._editor_container.clear()
+        self._editor_container.add_child(component)  # type: ignore[arg-type]
+        self.tui.set_focus(focus_target or component)  # type: ignore[arg-type]
+        self.tui.request_render()
+
+        def done() -> None:
+            self._editor_container.clear()
+            self._editor_container.add_child(self._editor)  # type: ignore[arg-type]
+            self.tui.set_focus(self._editor)  # type: ignore[arg-type]
+            self.tui.request_render()
+
+        return done
 
     def _add_message(self, component: object) -> None:
         """Append a component to the chat container (above editor & footer)."""
@@ -358,18 +374,17 @@ class MiniApp:
         def on_select(item: SelectItem) -> None:
             nonlocal selected_provider
             selected_provider = item.value
-            self.tui.hide_overlay()
+            restore()
             done_event.set()
 
         def on_cancel() -> None:
-            self.tui.hide_overlay()
+            restore()
             done_event.set()
 
         select.on_select = on_select
         select.on_cancel = on_cancel
 
-        opts = self._overlay_options_below_editor()
-        self.tui.show_overlay(select, opts)  # type: ignore[arg-type]
+        restore = self._show_selector(select)
         await done_event.wait()
 
         if selected_provider:
@@ -409,18 +424,17 @@ class MiniApp:
         def on_select(item: SelectItem) -> None:
             nonlocal selected_key
             selected_key = item.value
-            self.tui.hide_overlay()
+            restore()
             done_event.set()
 
         def on_cancel() -> None:
-            self.tui.hide_overlay()
+            restore()
             done_event.set()
 
         select.on_select = on_select
         select.on_cancel = on_cancel
 
-        opts = self._overlay_options_below_editor()
-        self.tui.show_overlay(select, opts)  # type: ignore[arg-type]
+        restore = self._show_selector(select)
         await done_event.wait()
 
         if selected_key and selected_key in options:
