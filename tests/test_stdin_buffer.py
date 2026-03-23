@@ -563,20 +563,23 @@ def test_buffer_multiple_mouse_events() -> None:
 
 
 def test_buffer_empty_input() -> None:
-    """Should handle empty input."""
+    """JS: process('') with empty buffer emits empty string event."""
     buf, col = _make_buffer()
     buf.process("")
-    assert col.data == []
+    assert col.data == [""]
 
 
 def test_buffer_lone_escape_with_flush() -> None:
-    """Should handle lone escape character with explicit flush."""
+    """JS flush() returns the remainder as a single sequence but does NOT emit.
+    The timer wrapper is responsible for emitting; direct flush() callers
+    receive the sequences and must emit themselves if needed."""
     buf, col = _make_buffer()
     buf.process("\x1b")
     assert col.data == []
     result = buf.flush()
     assert result == ["\x1b"]
-    assert col.data == ["\x1b"]
+    # flush() does not call on_data — matches JS flush() which just returns sequences
+    assert col.data == []
 
 
 def test_buffer_very_long_sequence() -> None:
@@ -594,13 +597,16 @@ def test_buffer_very_long_sequence() -> None:
 
 
 def test_flush_incomplete_sequences() -> None:
-    """Should flush incomplete sequences."""
+    """JS flush() returns the whole remaining buffer as ONE sequence (not split char-by-char)
+    and does not emit — the timer wrapper emits after calling flush()."""
     buf, col = _make_buffer()
     buf.process("\x1b[")
     assert col.data == []
     result = buf.flush()
-    assert result == ["\x1b", "["]
-    assert col.data == ["\x1b", "["]
+    # Whole remainder is one entry, not split
+    assert result == ["\x1b["]
+    # flush() itself does not call on_data
+    assert col.data == []
 
 
 def test_flush_returns_empty_if_nothing() -> None:

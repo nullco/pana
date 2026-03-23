@@ -133,19 +133,19 @@ class SettingsList:
         kb = get_editor_keybindings()
         display = self._filtered_items if self._search_enabled else self._items
 
-        if kb.matches(data, "selectUp"):
+        if kb.matches(data, "tui.select.up"):
             if display:
                 self._selected_index = (
                     len(display) - 1 if self._selected_index == 0 else self._selected_index - 1
                 )
-        elif kb.matches(data, "selectDown"):
+        elif kb.matches(data, "tui.select.down"):
             if display:
                 self._selected_index = (
                     0 if self._selected_index == len(display) - 1 else self._selected_index + 1
                 )
-        elif kb.matches(data, "selectConfirm") or data == " ":
+        elif kb.matches(data, "tui.select.confirm") or data == " ":
             self._activate_item()
-        elif kb.matches(data, "selectCancel"):
+        elif kb.matches(data, "tui.select.cancel"):
             self._on_cancel()
         elif self._search_enabled and self._search_input:
             sanitized = data.replace(" ", "")

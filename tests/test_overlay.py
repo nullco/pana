@@ -556,20 +556,26 @@ def test_nc_preserves_focus() -> None:
 
 
 def test_nc_focus_handle() -> None:
+    """JS isFocused() returns focusedComponent === component.
+    Non-capturing overlays don't take TUI focus, so is_focused() is False."""
     term = StubTerminal()
     tui, editor = _setup_nc_tui(term)
     overlay = _FocusableComponent("overlay")
     handle = tui.show_overlay(overlay, OverlayOptions(non_capturing=True))
-    assert handle.is_focused() is True
+    # Non-capturing: editor keeps keyboard focus, so overlay handle is not focused
+    assert handle.is_focused() is False
     # NC overlay doesn't steal focus from editor
     assert editor.focused is True
 
 
 def test_nc_unfocus_no_op_when_not_focused() -> None:
+    """Non-capturing overlays never hold TUI focus, so unfocus() is a no-op.
+    JS: isFocused() === (focusedComponent === component), already False for NC."""
     term = StubTerminal()
     tui, editor = _setup_nc_tui(term)
     overlay = _FocusableComponent("overlay")
     handle = tui.show_overlay(overlay, OverlayOptions(non_capturing=True))
+    assert handle.is_focused() is False  # was already False (NC doesn't take focus)
     handle.unfocus()
     assert handle.is_focused() is False
     # Editor still focused

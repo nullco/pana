@@ -189,45 +189,45 @@ class SelectList:
     def handle_input(self, data: str) -> None:
         kb = get_editor_keybindings()
 
-        if kb.matches(data, "selectUp"):
+        if kb.matches(data, "tui.select.up"):
             if self._filtered:
                 if self._selected_index == 0:
                     self.set_selected_index(len(self._filtered) - 1)
                 else:
                     self.set_selected_index(self._selected_index - 1)
             return
-        if kb.matches(data, "selectDown"):
+        if kb.matches(data, "tui.select.down"):
             if self._filtered:
                 if self._selected_index == len(self._filtered) - 1:
                     self.set_selected_index(0)
                 else:
                     self.set_selected_index(self._selected_index + 1)
             return
-        if kb.matches(data, "selectPageUp"):
+        if kb.matches(data, "tui.select.pageUp"):
             if self._filtered:
                 self.set_selected_index(max(0, self._selected_index - self._max_visible))
             return
-        if kb.matches(data, "selectPageDown"):
+        if kb.matches(data, "tui.select.pageDown"):
             if self._filtered:
                 self.set_selected_index(min(len(self._filtered) - 1, self._selected_index + self._max_visible))
             return
-        if kb.matches(data, "selectConfirm") or kb.matches(data, "tab"):
+        if kb.matches(data, "tui.select.confirm") or kb.matches(data, "tui.input.tab"):
             item = self.get_selected_item()
             if item and self.on_select:
                 self.on_select(item)
             return
-        if kb.matches(data, "selectCancel"):
+        if kb.matches(data, "tui.select.cancel"):
             if self.on_cancel:
                 self.on_cancel()
             return
 
         # Text input for searchable lists
         if self._searchable:
-            if kb.matches(data, "deleteCharBackward"):
+            if kb.matches(data, "tui.editor.deleteCharBackward"):
                 if self._filter:
                     self.set_filter(self._filter[:-1])
                 return
-            if kb.matches(data, "deleteToLineStart"):
+            if kb.matches(data, "tui.editor.deleteToLineStart"):
                 self.set_filter("")
                 return
 

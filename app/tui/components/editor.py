@@ -328,7 +328,7 @@ class Editor:
 
         # Jump mode
         if self._jump_mode is not None:
-            if kb.matches(data, "jumpForward") or kb.matches(data, "jumpBackward"):
+            if kb.matches(data, "tui.editor.jumpForward") or kb.matches(data, "tui.editor.jumpBackward"):
                 self._jump_mode = None
                 return
             if ord(data[0]) >= 32 if data else False:
@@ -357,21 +357,21 @@ class Editor:
                     self.handle_input(remaining)
             return
 
-        if kb.matches(data, "copy"):
+        if kb.matches(data, "tui.input.copy"):
             return
-        if kb.matches(data, "undo"):
+        if kb.matches(data, "tui.editor.undo"):
             self._undo()
             return
 
         # Autocomplete mode
         if self._autocomplete_state and self._autocomplete_list:
-            if kb.matches(data, "selectCancel"):
+            if kb.matches(data, "tui.select.cancel"):
                 self._cancel_autocomplete()
                 return
-            if kb.matches(data, "selectUp") or kb.matches(data, "selectDown"):
+            if kb.matches(data, "tui.select.up") or kb.matches(data, "tui.select.down"):
                 self._autocomplete_list.handle_input(data)
                 return
-            if kb.matches(data, "tab"):
+            if kb.matches(data, "tui.input.tab"):
                 sel = self._autocomplete_list.get_selected_item()
                 if sel and self._autocomplete_provider:
                     self._push_undo()
@@ -391,7 +391,7 @@ class Editor:
                     if is_slash_cmd:
                         self._try_trigger_autocomplete()
                 return
-            if kb.matches(data, "selectConfirm"):
+            if kb.matches(data, "tui.select.confirm"):
                 sel = self._autocomplete_list.get_selected_item()
                 if sel and self._autocomplete_provider:
                     self._push_undo()
@@ -411,57 +411,57 @@ class Editor:
                             self.on_change(self.get_text())
                         return
 
-        if kb.matches(data, "tab") and not self._autocomplete_state:
+        if kb.matches(data, "tui.input.tab") and not self._autocomplete_state:
             self._handle_tab()
             return
 
         # Deletion
-        if kb.matches(data, "deleteToLineEnd"):
+        if kb.matches(data, "tui.editor.deleteToLineEnd"):
             self._delete_to_end()
             return
-        if kb.matches(data, "deleteToLineStart"):
+        if kb.matches(data, "tui.editor.deleteToLineStart"):
             self._delete_to_start()
             return
-        if kb.matches(data, "deleteWordBackward"):
+        if kb.matches(data, "tui.editor.deleteWordBackward"):
             self._delete_word_backward()
             return
-        if kb.matches(data, "deleteWordForward"):
+        if kb.matches(data, "tui.editor.deleteWordForward"):
             self._delete_word_forward()
             return
-        if kb.matches(data, "deleteCharBackward") or matches_key(data, "shift+backspace"):
+        if kb.matches(data, "tui.editor.deleteCharBackward") or matches_key(data, "shift+backspace"):
             self._handle_backspace()
             return
-        if kb.matches(data, "deleteCharForward") or matches_key(data, "shift+delete"):
+        if kb.matches(data, "tui.editor.deleteCharForward") or matches_key(data, "shift+delete"):
             self._handle_forward_delete()
             return
 
         # Kill ring
-        if kb.matches(data, "yank"):
+        if kb.matches(data, "tui.editor.yank"):
             self._yank()
             return
-        if kb.matches(data, "yankPop"):
+        if kb.matches(data, "tui.editor.yankPop"):
             self._yank_pop()
             return
 
         # Cursor movement
-        if kb.matches(data, "cursorLineStart"):
+        if kb.matches(data, "tui.editor.cursorLineStart"):
             self._last_action = None
             self._set_cursor_col(0)
             return
-        if kb.matches(data, "cursorLineEnd"):
+        if kb.matches(data, "tui.editor.cursorLineEnd"):
             self._last_action = None
             self._set_cursor_col(len(self._lines[self._cursor_line]))
             return
-        if kb.matches(data, "cursorWordLeft"):
+        if kb.matches(data, "tui.editor.cursorWordLeft"):
             self._move_word_backward()
             return
-        if kb.matches(data, "cursorWordRight"):
+        if kb.matches(data, "tui.editor.cursorWordRight"):
             self._move_word_forward()
             return
 
         # New line
         if (
-            kb.matches(data, "newLine")
+            kb.matches(data, "tui.input.newLine")
             or (len(data) > 1 and ord(data[0]) == 10)
             or data == "\x1b\r"
             or data == "\x1b[13;2~"
@@ -471,7 +471,7 @@ class Editor:
             return
 
         # Submit
-        if kb.matches(data, "submit"):
+        if kb.matches(data, "tui.input.submit"):
             if self.disable_submit:
                 return
             current = self._lines[self._cursor_line]
@@ -483,7 +483,7 @@ class Editor:
             return
 
         # Arrow keys with history
-        if kb.matches(data, "cursorUp"):
+        if kb.matches(data, "tui.editor.cursorUp"):
             if self._is_empty():
                 self._navigate_history(-1)
             elif self._history_index > -1 and self._on_first_visual_line():
@@ -493,7 +493,7 @@ class Editor:
             else:
                 self._move_cursor(-1, 0)
             return
-        if kb.matches(data, "cursorDown"):
+        if kb.matches(data, "tui.editor.cursorDown"):
             if self._history_index > -1 and self._on_last_visual_line():
                 self._navigate_history(1)
             elif self._on_last_visual_line():
@@ -501,24 +501,24 @@ class Editor:
             else:
                 self._move_cursor(1, 0)
             return
-        if kb.matches(data, "cursorRight"):
+        if kb.matches(data, "tui.editor.cursorRight"):
             self._move_cursor(0, 1)
             return
-        if kb.matches(data, "cursorLeft"):
+        if kb.matches(data, "tui.editor.cursorLeft"):
             self._move_cursor(0, -1)
             return
 
-        if kb.matches(data, "pageUp"):
+        if kb.matches(data, "tui.editor.pageUp"):
             self._page_scroll(-1)
             return
-        if kb.matches(data, "pageDown"):
+        if kb.matches(data, "tui.editor.pageDown"):
             self._page_scroll(1)
             return
 
-        if kb.matches(data, "jumpForward"):
+        if kb.matches(data, "tui.editor.jumpForward"):
             self._jump_mode = "forward"
             return
-        if kb.matches(data, "jumpBackward"):
+        if kb.matches(data, "tui.editor.jumpBackward"):
             self._jump_mode = "backward"
             return
 

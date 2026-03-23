@@ -316,105 +316,105 @@ class Input:
         kb = get_editor_keybindings()
 
         # --- Keybinding matching ---
-        if kb.matches(data, "selectCancel"):
+        if kb.matches(data, "tui.select.cancel"):
             self._break_typing_run()
             self._last_action = "selectCancel"
             if self.on_escape:
                 self.on_escape()
             return
 
-        if kb.matches(data, "undo"):
+        if kb.matches(data, "tui.editor.undo"):
             self._break_typing_run()
             self._last_action = "undo"
             self._pop_undo()
             return
 
-        if kb.matches(data, "submit"):
+        if kb.matches(data, "tui.input.submit"):
             self._break_typing_run()
             self._last_action = "submit"
             if self.on_submit:
                 self.on_submit(self.value)
             return
 
-        if kb.matches(data, "deleteCharBackward"):
+        if kb.matches(data, "tui.editor.deleteCharBackward"):
             self._break_typing_run()
             self._last_action = "deleteCharBackward"
             self._delete_char_backward()
             return
 
-        if kb.matches(data, "deleteCharForward"):
+        if kb.matches(data, "tui.editor.deleteCharForward"):
             self._break_typing_run()
             self._last_action = "deleteCharForward"
             self._delete_char_forward()
             return
 
-        if kb.matches(data, "deleteWordBackward"):
+        if kb.matches(data, "tui.editor.deleteWordBackward"):
             self._break_typing_run()
             self._last_action = "deleteWordBackward"
             self._delete_word_backward()
             return
 
-        if kb.matches(data, "deleteWordForward"):
+        if kb.matches(data, "tui.editor.deleteWordForward"):
             self._break_typing_run()
             self._last_action = "deleteWordForward"
             self._delete_word_forward()
             return
 
-        if kb.matches(data, "deleteToLineStart"):
+        if kb.matches(data, "tui.editor.deleteToLineStart"):
             self._break_typing_run()
             self._last_action = "deleteToLineStart"
             self._delete_to_line_start()
             return
 
-        if kb.matches(data, "deleteToLineEnd"):
+        if kb.matches(data, "tui.editor.deleteToLineEnd"):
             self._break_typing_run()
             self._last_action = "deleteToLineEnd"
             self._delete_to_line_end()
             return
 
-        if kb.matches(data, "yank"):
+        if kb.matches(data, "tui.editor.yank"):
             self._break_typing_run()
             self._last_action = "yank"
             self._yank()
             return
 
-        if kb.matches(data, "yankPop"):
+        if kb.matches(data, "tui.editor.yankPop"):
             if self._last_action in ("yank", "yankPop"):
                 self._last_action = "yankPop"
                 self._yank_pop()
             return
 
-        if kb.matches(data, "cursorLeft"):
+        if kb.matches(data, "tui.editor.cursorLeft"):
             self._break_typing_run()
             self._last_action = "cursorLeft"
             self._move_left()
             return
 
-        if kb.matches(data, "cursorRight"):
+        if kb.matches(data, "tui.editor.cursorRight"):
             self._break_typing_run()
             self._last_action = "cursorRight"
             self._move_right()
             return
 
-        if kb.matches(data, "cursorLineStart"):
+        if kb.matches(data, "tui.editor.cursorLineStart"):
             self._break_typing_run()
             self._last_action = "cursorLineStart"
             self._move_line_start()
             return
 
-        if kb.matches(data, "cursorLineEnd"):
+        if kb.matches(data, "tui.editor.cursorLineEnd"):
             self._break_typing_run()
             self._last_action = "cursorLineEnd"
             self._move_line_end()
             return
 
-        if kb.matches(data, "cursorWordLeft"):
+        if kb.matches(data, "tui.editor.cursorWordLeft"):
             self._break_typing_run()
             self._last_action = "cursorWordLeft"
             self._move_word_left()
             return
 
-        if kb.matches(data, "cursorWordRight"):
+        if kb.matches(data, "tui.editor.cursorWordRight"):
             self._break_typing_run()
             self._last_action = "cursorWordRight"
             self._move_word_right()

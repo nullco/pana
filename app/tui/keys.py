@@ -1,14 +1,23 @@
 """Keyboard input handling for terminal applications.
 
 Supports both legacy terminal sequences and Kitty keyboard protocol.
+See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
+
+API:
+- matchesKey(data, keyId) - Check if input matches a key identifier
+- parseKey(data)          - Parse input and return the key identifier
+- Key                     - Helper object for creating typed key identifiers
+- setKittyProtocolActive  - Set global Kitty protocol state
+- isKittyProtocolActive   - Query global Kitty protocol state
 """
 from __future__ import annotations
 
+import os
 import re
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Global Kitty Protocol State
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 _kitty_protocol_active = False
 
@@ -22,9 +31,9 @@ def is_kitty_protocol_active() -> bool:
     return _kitty_protocol_active
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Key helper
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 
 class _Key:
@@ -32,6 +41,7 @@ class _Key:
     escape = "escape"
     esc = "esc"
     enter = "enter"
+    return_ = "return"
     tab = "tab"
     space = "space"
     backspace = "backspace"
@@ -59,6 +69,19 @@ class _Key:
     f11 = "f11"
     f12 = "f12"
 
+    # Symbol keys
+    backtick = "`"
+    hyphen = "-"
+    equals = "="
+    leftbracket = "["
+    rightbracket = "]"
+    backslash = "\\"
+    semicolon = ";"
+    quote = "'"
+    comma = ","
+    period = "."
+    slash = "/"
+
     @staticmethod
     def ctrl(key: str) -> str:
         return f"ctrl+{key}"
@@ -76,6 +99,10 @@ class _Key:
         return f"ctrl+shift+{key}"
 
     @staticmethod
+    def shift_ctrl(key: str) -> str:
+        return f"shift+ctrl+{key}"
+
+    @staticmethod
     def ctrl_alt(key: str) -> str:
         return f"ctrl+alt+{key}"
 
@@ -83,15 +110,21 @@ class _Key:
     def shift_alt(key: str) -> str:
         return f"shift+alt+{key}"
 
+    @staticmethod
+    def ctrl_shift_alt(key: str) -> str:
+        return f"ctrl+shift+alt+{key}"
+
 
 Key = _Key()
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 # Constants
-# ---------------------------------------------------------------------------
+# =============================================================================
+
+SYMBOL_KEYS = set("`-=[]\\;',./!@#$%^&*()_+|~{}:<>?")
 
 MODIFIERS = {"shift": 1, "alt": 2, "ctrl": 4}
-LOCK_MASK = 64 + 128
+LOCK_MASK = 64 + 128  # Caps Lock + Num Lock
 
 CODEPOINTS = {
     "escape": 27,
@@ -99,7 +132,7 @@ CODEPOINTS = {
     "enter": 13,
     "space": 32,
     "backspace": 127,
-    "kpEnter": 57414,
+    "kpEnter": 57414,  # Numpad Enter (Kitty protocol)
 }
 
 ARROW_CODEPOINTS = {"up": -1, "down": -2, "right": -3, "left": -4}
@@ -112,10 +145,6 @@ FUNCTIONAL_CODEPOINTS = {
     "home": -14,
     "end": -15,
 }
-
-SYMBOL_KEYS = set(
-    "`-=[]\\;',./!@#$%^&*()_+|~{}:<>?"
-)
 
 LEGACY_KEY_SEQUENCES: dict[str, list[str]] = {
     "up": ["\x1b[A", "\x1bOA"],
@@ -197,9 +226,24 @@ LEGACY_SEQUENCE_KEY_IDS: dict[str, str] = {
     "\x1bp": "alt+up", "\x1bn": "alt+down",
 }
 
-# ---------------------------------------------------------------------------
+# =============================================================================
+# Platform helpers
+# =============================================================================
+
+
+def _is_windows_terminal_session() -> bool:
+    """Return True when running inside Windows Terminal (not over SSH)."""
+    return (
+        bool(os.environ.get("WT_SESSION"))
+        and not os.environ.get("SSH_CONNECTION")
+        and not os.environ.get("SSH_CLIENT")
+        and not os.environ.get("SSH_TTY")
+    )
+
+
+# =============================================================================
 # Kitty Protocol Parsing
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 _CSI_U_RE = re.compile(
     r"^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$"
@@ -309,12 +353,21 @@ def _matches_modify_other(data: str, keycode: int, modifier: int) -> bool:
     return parsed["codepoint"] == keycode and parsed["modifier"] == modifier
 
 
-# ---------------------------------------------------------------------------
+def _matches_printable_modify_other(data: str, keycode: int, modifier: int) -> bool:
+    """Match modifyOtherKeys only when modifier != 0 (printable key context)."""
+    if modifier == 0:
+        return False
+    return _matches_modify_other(data, keycode, modifier)
+
+
+# =============================================================================
 # Release / Repeat detection
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 
 def is_key_release(data: str) -> bool:
+    """Return True if *data* is a Kitty key-release event."""
+    # Bracketed paste content may contain patterns like ":3F" — don't misidentify.
     if "\x1b[200~" in data:
         return False
     for suffix in (":3u", ":3~", ":3A", ":3B", ":3C", ":3D", ":3H", ":3F"):
@@ -324,6 +377,7 @@ def is_key_release(data: str) -> bool:
 
 
 def is_key_repeat(data: str) -> bool:
+    """Return True if *data* is a Kitty key-repeat event."""
     if "\x1b[200~" in data:
         return False
     for suffix in (":2u", ":2~", ":2A", ":2B", ":2C", ":2D", ":2H", ":2F"):
@@ -332,9 +386,29 @@ def is_key_repeat(data: str) -> bool:
     return False
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
+# Backspace ambiguity helper
+# =============================================================================
+
+
+def _matches_raw_backspace(data: str, expected_modifier: int) -> bool:
+    """Handle 0x7f / 0x08 backspace ambiguity.
+
+    0x7f  → always plain backspace (modifier == 0).
+    0x08  → Windows Terminal: ctrl+backspace; elsewhere: plain backspace.
+    """
+    if data == "\x7f":
+        return expected_modifier == 0
+    if data != "\x08":
+        return False
+    if _is_windows_terminal_session():
+        return expected_modifier == MODIFIERS["ctrl"]
+    return expected_modifier == 0
+
+
+# =============================================================================
 # Helpers
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 
 def _raw_ctrl_char(key: str) -> str | None:
@@ -369,12 +443,60 @@ def _matches_legacy_mod_seq(data: str, key: str, modifier: int) -> bool:
     return False
 
 
-# ---------------------------------------------------------------------------
+def _format_key_with_mods(key_name: str, modifier: int) -> str | None:
+    eff = modifier & ~LOCK_MASK
+    supported = MODIFIERS["shift"] | MODIFIERS["ctrl"] | MODIFIERS["alt"]
+    if eff & ~supported:
+        return None
+    mods: list[str] = []
+    if eff & MODIFIERS["shift"]:
+        mods.append("shift")
+    if eff & MODIFIERS["ctrl"]:
+        mods.append("ctrl")
+    if eff & MODIFIERS["alt"]:
+        mods.append("alt")
+    return f"{'+'.join(mods)}+{key_name}" if mods else key_name
+
+
+def _format_parsed_key(cp: int, modifier: int, base_layout_key: int | None = None) -> str | None:
+    is_latin = 97 <= cp <= 122
+    is_digit = 48 <= cp <= 57
+    is_symbol = chr(cp) in SYMBOL_KEYS if 0 <= cp <= 0x10FFFF else False
+    eff_cp = cp if (is_latin or is_digit or is_symbol) else (base_layout_key if base_layout_key is not None else cp)
+
+    _map: dict[int, str] = {
+        CODEPOINTS["escape"]: "escape", CODEPOINTS["tab"]: "tab",
+        CODEPOINTS["enter"]: "enter", CODEPOINTS["kpEnter"]: "enter",
+        CODEPOINTS["space"]: "space", CODEPOINTS["backspace"]: "backspace",
+        FUNCTIONAL_CODEPOINTS["delete"]: "delete",
+        FUNCTIONAL_CODEPOINTS["insert"]: "insert",
+        FUNCTIONAL_CODEPOINTS["home"]: "home", FUNCTIONAL_CODEPOINTS["end"]: "end",
+        FUNCTIONAL_CODEPOINTS["pageUp"]: "pageUp",
+        FUNCTIONAL_CODEPOINTS["pageDown"]: "pageDown",
+        ARROW_CODEPOINTS["up"]: "up", ARROW_CODEPOINTS["down"]: "down",
+        ARROW_CODEPOINTS["left"]: "left", ARROW_CODEPOINTS["right"]: "right",
+    }
+    key_name = _map.get(eff_cp)
+    if key_name is None:
+        if 48 <= eff_cp <= 57 or 97 <= eff_cp <= 122:
+            key_name = chr(eff_cp)
+        elif chr(eff_cp) in SYMBOL_KEYS if 0 <= eff_cp <= 0x10FFFF else False:
+            key_name = chr(eff_cp)
+    if key_name is None:
+        return None
+    return _format_key_with_mods(key_name, modifier)
+
+
+# =============================================================================
 # matches_key — main entry point
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 
 def matches_key(data: str, key_id: str) -> bool:
+    """Return True if *data* matches the key described by *key_id*.
+
+    Examples: ``matches_key(data, "ctrl+c")``, ``matches_key(data, "shift+enter")``.
+    """
     parsed = _parse_key_id(key_id)
     if not parsed:
         return False
@@ -393,7 +515,11 @@ def matches_key(data: str, key_id: str) -> bool:
     if key in ("escape", "esc"):
         if modifier != 0:
             return False
-        return data == "\x1b" or _matches_kitty(data, CODEPOINTS["escape"], 0)
+        return (
+            data == "\x1b"
+            or _matches_kitty(data, CODEPOINTS["escape"], 0)
+            or _matches_modify_other(data, CODEPOINTS["escape"], 0)
+        )
 
     if key == "space":
         if not _kitty_protocol_active:
@@ -402,20 +528,36 @@ def matches_key(data: str, key_id: str) -> bool:
             if alt and not ctrl and not shift and data == "\x1b ":
                 return True
         if modifier == 0:
-            return data == " " or _matches_kitty(data, CODEPOINTS["space"], 0)
-        return _matches_kitty(data, CODEPOINTS["space"], modifier)
+            return (
+                data == " "
+                or _matches_kitty(data, CODEPOINTS["space"], 0)
+                or _matches_modify_other(data, CODEPOINTS["space"], 0)
+            )
+        return (
+            _matches_kitty(data, CODEPOINTS["space"], modifier)
+            or _matches_modify_other(data, CODEPOINTS["space"], modifier)
+        )
 
     if key == "tab":
         if shift and not ctrl and not alt:
-            return data == "\x1b[Z" or _matches_kitty(data, CODEPOINTS["tab"], MODIFIERS["shift"])
+            return (
+                data == "\x1b[Z"
+                or _matches_kitty(data, CODEPOINTS["tab"], MODIFIERS["shift"])
+                or _matches_modify_other(data, CODEPOINTS["tab"], MODIFIERS["shift"])
+            )
         if modifier == 0:
             return data == "\t" or _matches_kitty(data, CODEPOINTS["tab"], 0)
-        return _matches_kitty(data, CODEPOINTS["tab"], modifier)
+        return (
+            _matches_kitty(data, CODEPOINTS["tab"], modifier)
+            or _matches_modify_other(data, CODEPOINTS["tab"], modifier)
+        )
 
     if key in ("enter", "return"):
         if shift and not ctrl and not alt:
-            if (_matches_kitty(data, CODEPOINTS["enter"], MODIFIERS["shift"])
-                    or _matches_kitty(data, CODEPOINTS["kpEnter"], MODIFIERS["shift"])):
+            if (
+                _matches_kitty(data, CODEPOINTS["enter"], MODIFIERS["shift"])
+                or _matches_kitty(data, CODEPOINTS["kpEnter"], MODIFIERS["shift"])
+            ):
                 return True
             if _matches_modify_other(data, CODEPOINTS["enter"], MODIFIERS["shift"]):
                 return True
@@ -423,8 +565,10 @@ def matches_key(data: str, key_id: str) -> bool:
                 return data == "\x1b\r" or data == "\n"
             return False
         if alt and not ctrl and not shift:
-            if (_matches_kitty(data, CODEPOINTS["enter"], MODIFIERS["alt"])
-                    or _matches_kitty(data, CODEPOINTS["kpEnter"], MODIFIERS["alt"])):
+            if (
+                _matches_kitty(data, CODEPOINTS["enter"], MODIFIERS["alt"])
+                or _matches_kitty(data, CODEPOINTS["kpEnter"], MODIFIERS["alt"])
+            ):
                 return True
             if _matches_modify_other(data, CODEPOINTS["enter"], MODIFIERS["alt"]):
                 return True
@@ -449,12 +593,30 @@ def matches_key(data: str, key_id: str) -> bool:
         if alt and not ctrl and not shift:
             if data in ("\x1b\x7f", "\x1b\x08"):
                 return True
-            return _matches_kitty(data, CODEPOINTS["backspace"], MODIFIERS["alt"])
+            return (
+                _matches_kitty(data, CODEPOINTS["backspace"], MODIFIERS["alt"])
+                or _matches_modify_other(data, CODEPOINTS["backspace"], MODIFIERS["alt"])
+            )
+        if ctrl and not alt and not shift:
+            # 0x08 is ambiguous: Ctrl+Backspace on Windows Terminal, plain Backspace elsewhere
+            if _matches_raw_backspace(data, MODIFIERS["ctrl"]):
+                return True
+            return (
+                _matches_kitty(data, CODEPOINTS["backspace"], MODIFIERS["ctrl"])
+                or _matches_modify_other(data, CODEPOINTS["backspace"], MODIFIERS["ctrl"])
+            )
         if modifier == 0:
-            return data in ("\x7f", "\x08") or _matches_kitty(data, CODEPOINTS["backspace"], 0)
-        return _matches_kitty(data, CODEPOINTS["backspace"], modifier)
+            return (
+                _matches_raw_backspace(data, 0)
+                or _matches_kitty(data, CODEPOINTS["backspace"], 0)
+                or _matches_modify_other(data, CODEPOINTS["backspace"], 0)
+            )
+        return (
+            _matches_kitty(data, CODEPOINTS["backspace"], modifier)
+            or _matches_modify_other(data, CODEPOINTS["backspace"], modifier)
+        )
 
-    # Functional keys: insert, delete, home, end, pageup, pagedown
+    # Functional keys
     _func_key_map = {
         "insert": "insert", "delete": "delete",
         "home": "home", "end": "end",
@@ -484,21 +646,22 @@ def matches_key(data: str, key_id: str) -> bool:
         cp = ARROW_CODEPOINTS[canon]
 
         if alt and not ctrl and not shift:
-            if key == "up" and data == "\x1bp":
-                return True
-            if key == "down" and data == "\x1bn":
-                return True
+            if key == "up":
+                return data == "\x1bp" or _matches_kitty(data, cp, MODIFIERS["alt"])
+            if key == "down":
+                return data == "\x1bn" or _matches_kitty(data, cp, MODIFIERS["alt"])
             if key == "left":
                 if data in ("\x1b[1;3D", "\x1bb"):
                     return True
                 if not _kitty_protocol_active and data == "\x1bB":
                     return True
+                return _matches_kitty(data, cp, MODIFIERS["alt"])
             if key == "right":
                 if data in ("\x1b[1;3C", "\x1bf"):
                     return True
                 if not _kitty_protocol_active and data == "\x1bF":
                     return True
-            return _matches_kitty(data, cp, MODIFIERS["alt"])
+                return _matches_kitty(data, cp, MODIFIERS["alt"])
 
         if ctrl and not alt and not shift:
             if key == "left":
@@ -551,15 +714,14 @@ def matches_key(data: str, key_id: str) -> bool:
                 return True
             return (
                 _matches_kitty(data, codepoint, MODIFIERS["ctrl"])
-                or (modifier != 0
-                    and _matches_modify_other(data, codepoint, MODIFIERS["ctrl"]))
+                or _matches_printable_modify_other(data, codepoint, MODIFIERS["ctrl"])
             )
 
         if ctrl and shift and not alt:
             mod = MODIFIERS["shift"] + MODIFIERS["ctrl"]
             return (
                 _matches_kitty(data, codepoint, mod)
-                or _matches_modify_other(data, codepoint, mod)
+                or _matches_printable_modify_other(data, codepoint, mod)
             )
 
         if shift and not ctrl and not alt:
@@ -567,13 +729,13 @@ def matches_key(data: str, key_id: str) -> bool:
                 return True
             return (
                 _matches_kitty(data, codepoint, MODIFIERS["shift"])
-                or _matches_modify_other(data, codepoint, MODIFIERS["shift"])
+                or _matches_printable_modify_other(data, codepoint, MODIFIERS["shift"])
             )
 
         if modifier != 0:
             return (
                 _matches_kitty(data, codepoint, modifier)
-                or _matches_modify_other(data, codepoint, modifier)
+                or _matches_printable_modify_other(data, codepoint, modifier)
             )
 
         return data == key or _matches_kitty(data, codepoint, 0)
@@ -581,57 +743,13 @@ def matches_key(data: str, key_id: str) -> bool:
     return False
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 # parse_key
-# ---------------------------------------------------------------------------
-
-
-def _format_key_with_mods(key_name: str, modifier: int) -> str | None:
-    eff = modifier & ~LOCK_MASK
-    supported = MODIFIERS["shift"] | MODIFIERS["ctrl"] | MODIFIERS["alt"]
-    if eff & ~supported:
-        return None
-    mods: list[str] = []
-    if eff & MODIFIERS["shift"]:
-        mods.append("shift")
-    if eff & MODIFIERS["ctrl"]:
-        mods.append("ctrl")
-    if eff & MODIFIERS["alt"]:
-        mods.append("alt")
-    return f"{'+'.join(mods)}+{key_name}" if mods else key_name
-
-
-def _format_parsed_key(cp: int, modifier: int, base_layout_key: int | None = None) -> str | None:
-    is_latin = 97 <= cp <= 122
-    is_digit = 48 <= cp <= 57
-    is_symbol = chr(cp) in SYMBOL_KEYS if 0 <= cp <= 0x10FFFF else False
-    eff_cp = cp if (is_latin or is_digit or is_symbol) else (base_layout_key if base_layout_key is not None else cp)
-
-    key_name: str | None = None
-    _map: dict[int, str] = {
-        CODEPOINTS["escape"]: "escape", CODEPOINTS["tab"]: "tab",
-        CODEPOINTS["enter"]: "enter", CODEPOINTS["kpEnter"]: "enter",
-        CODEPOINTS["space"]: "space", CODEPOINTS["backspace"]: "backspace",
-        FUNCTIONAL_CODEPOINTS["delete"]: "delete",
-        FUNCTIONAL_CODEPOINTS["insert"]: "insert",
-        FUNCTIONAL_CODEPOINTS["home"]: "home", FUNCTIONAL_CODEPOINTS["end"]: "end",
-        FUNCTIONAL_CODEPOINTS["pageUp"]: "pageUp",
-        FUNCTIONAL_CODEPOINTS["pageDown"]: "pageDown",
-        ARROW_CODEPOINTS["up"]: "up", ARROW_CODEPOINTS["down"]: "down",
-        ARROW_CODEPOINTS["left"]: "left", ARROW_CODEPOINTS["right"]: "right",
-    }
-    key_name = _map.get(eff_cp)
-    if key_name is None:
-        if 48 <= eff_cp <= 57 or 97 <= eff_cp <= 122:
-            key_name = chr(eff_cp)
-        elif chr(eff_cp) in SYMBOL_KEYS:
-            key_name = chr(eff_cp)
-    if key_name is None:
-        return None
-    return _format_key_with_mods(key_name, modifier)
+# =============================================================================
 
 
 def parse_key(data: str) -> str | None:
+    """Parse raw input and return a key identifier string, or None."""
     kitty = parse_kitty_sequence(data)
     if kitty:
         return _format_parsed_key(
@@ -642,6 +760,7 @@ def parse_key(data: str) -> str | None:
     if mok:
         return _format_parsed_key(mok["codepoint"], mok["modifier"])
 
+    # Mode-aware sequences
     if _kitty_protocol_active:
         if data in ("\x1b\r", "\n"):
             return "shift+enter"
@@ -650,28 +769,42 @@ def parse_key(data: str) -> str | None:
     if legacy:
         return legacy
 
-    # Simple legacy sequences
-    _simple: dict[str, str] = {
-        "\x1b": "escape", "\x1c": "ctrl+\\", "\x1d": "ctrl+]", "\x1f": "ctrl+-",
-        "\x1b\x1b": "ctrl+alt+[", "\x1b\x1c": "ctrl+alt+\\",
-        "\x1b\x1d": "ctrl+alt+]", "\x1b\x1f": "ctrl+alt+-",
-        "\t": "tab", "\x00": "ctrl+space", " ": "space",
-        "\x1b[Z": "shift+tab",
-        "\x1b\x7f": "alt+backspace", "\x1b\x08": "alt+backspace",
-        "\x1bOM": "enter",
-    }
-    r = _simple.get(data)
-    if r:
-        return r
-
-    if data in ("\x7f", "\x08"):
-        return "backspace"
-    if data == "\r" or (not _kitty_protocol_active and data == "\n"):
+    if data == "\x1b":
+        return "escape"
+    if data == "\x1c":
+        return "ctrl+\\"
+    if data == "\x1d":
+        return "ctrl+]"
+    if data == "\x1f":
+        return "ctrl+-"
+    if data == "\x1b\x1b":
+        return "ctrl+alt+["
+    if data == "\x1b\x1c":
+        return "ctrl+alt+\\"
+    if data == "\x1b\x1d":
+        return "ctrl+alt+]"
+    if data == "\x1b\x1f":
+        return "ctrl+alt+-"
+    if data == "\t":
+        return "tab"
+    if data == "\r" or (not _kitty_protocol_active and data == "\n") or data == "\x1bOM":
         return "enter"
+    if data == "\x00":
+        return "ctrl+space"
+    if data == " ":
+        return "space"
+    if data == "\x7f":
+        return "backspace"
+    if data == "\x08":
+        return "ctrl+backspace" if _is_windows_terminal_session() else "backspace"
+    if data == "\x1b[Z":
+        return "shift+tab"
     if not _kitty_protocol_active and data == "\x1b\r":
         return "alt+enter"
     if not _kitty_protocol_active and data == "\x1b ":
         return "alt+space"
+    if data in ("\x1b\x7f", "\x1b\x08"):
+        return "alt+backspace"
     if not _kitty_protocol_active and data == "\x1bB":
         return "alt+left"
     if not _kitty_protocol_active and data == "\x1bF":
@@ -684,17 +817,25 @@ def parse_key(data: str) -> str | None:
         if (97 <= code <= 122) or (48 <= code <= 57):
             return f"alt+{chr(code)}"
 
-    # Arrow keys
-    _arrow_simple = {
-        "\x1b[A": "up", "\x1b[B": "down", "\x1b[C": "right", "\x1b[D": "left",
-        "\x1b[H": "home", "\x1b[F": "end",
-        "\x1b[3~": "delete", "\x1b[5~": "pageUp", "\x1b[6~": "pageDown",
-    }
-    r = _arrow_simple.get(data)
-    if r:
-        return r
+    if data == "\x1b[A":
+        return "up"
+    if data == "\x1b[B":
+        return "down"
+    if data == "\x1b[C":
+        return "right"
+    if data == "\x1b[D":
+        return "left"
+    if data in ("\x1b[H", "\x1bOH"):
+        return "home"
+    if data in ("\x1b[F", "\x1bOF"):
+        return "end"
+    if data == "\x1b[3~":
+        return "delete"
+    if data == "\x1b[5~":
+        return "pageUp"
+    if data == "\x1b[6~":
+        return "pageDown"
 
-    # Raw ctrl+letter
     if len(data) == 1:
         code = ord(data)
         if 1 <= code <= 26:
@@ -705,14 +846,15 @@ def parse_key(data: str) -> str | None:
     return None
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 # decode_kitty_printable
-# ---------------------------------------------------------------------------
+# =============================================================================
 
 _KITTY_PRINTABLE_ALLOWED = MODIFIERS["shift"] | LOCK_MASK
 
 
 def decode_kitty_printable(data: str) -> str | None:
+    """Extract a printable character from a Kitty CSI-u sequence, or None."""
     m = _CSI_U_RE.match(data)
     if not m:
         return None
