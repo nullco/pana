@@ -18,21 +18,25 @@ from state import state
 
 from app.tui.autocomplete import AutocompleteItem, CombinedAutocompleteProvider, SlashCommand
 from app.tui.components.editor import Editor, EditorOptions, EditorTheme, SelectListTheme
+from app.tui.components.footer import Footer
 from app.tui.components.loader import Loader
 from app.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
 from app.tui.components.select_list import SelectItem, SelectList
 from app.tui.components.select_list import SelectListTheme as SLTheme
 from app.tui.components.spacer import Spacer
 from app.tui.components.text import Text
-from app.tui.components.truncated_text import TruncatedText
 from app.tui.terminal import ProcessTerminal
-from app.tui.tui import TUI, OverlayOptions
+from app.tui.tui import TUI, Container, OverlayOptions
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # ANSI color helpers
 # ---------------------------------------------------------------------------
+
+def _user_msg_bg(s: str) -> str:
+    """Dark blue-gray background matching the original pi-tui userMessageBg (#343541)."""
+    return f"\x1b[48;2;52;53;65m{s}\x1b[49m"
 
 def _cyan(s: str) -> str:
     return f"\x1b[36m{s}\x1b[0m"
@@ -173,30 +177,33 @@ def _resolve_command(cmd: str) -> str:
 
 
 class MiniApp:
-    """Manages the TUI app lifecycle."""
+    """Manages the TUI app lifecycle.
+
+    Component tree mirrors the original pi-tui interactive mode:
+
+        TUI
+        ├── chatContainer      (header + messages)
+        ├── editor
+        └── footer             (cwd, model name right-aligned)
+    """
 
     def __init__(self) -> None:
         self.agent: Agent | None = None
         self.terminal = ProcessTerminal()
         self.tui = TUI(self.terminal)
-        self._messages_container = self.tui  # add messages directly to TUI
+        self._chat_container = Container()
         self._editor: Editor | None = None
-        self._status_bar: TruncatedText | None = None
+        self._footer: Footer | None = None
         self._awaiting_response = False
 
-    def _build_status(self) -> str:
-        if self.agent:
-            return f"{_dim(self.agent.model_name)} {_dim('·')} {_dim(self.agent.provider_name)}"
-        return _dim("no model selected — /model to choose")
-
     def _setup_ui(self) -> None:
-        # Status bar at bottom (will be re-added after messages)
-        self._status_bar = TruncatedText(self._build_status())
+        # Footer (cwd + model info, rendered below editor)
+        self._footer = Footer(dim_fn=_dim)
 
         # Detect fd for fuzzy file completion
         fd_path = shutil.which("fd") or shutil.which("fdfind")
 
-        # Slash commands for autocomplete (name-only; commands use overlay pickers)
+        # Slash commands for autocomplete
         slash_commands = [
             SlashCommand(name=name, description=desc)
             for name, desc in COMMANDS.items()
@@ -213,21 +220,24 @@ class MiniApp:
         self._editor.set_autocomplete_provider(autocomplete)
         self._editor.on_submit = self._on_submit
 
-        # Build layout
-        self.tui.add_child(Text(_bold(_cyan("Agent 007")) + " — mini mode", padding_x=0, padding_y=0))
-        self.tui.add_child(Spacer(1))
-        self.tui.add_child(self._status_bar)
-        self.tui.add_child(Spacer(1))
+        # Build layout matching original pi-tui tree
+        self._chat_container.add_child(
+            Text(_bold(_cyan("Agent 007")) + " — mini mode", padding_x=0, padding_y=0)
+        )
+        self._chat_container.add_child(Spacer(1))
+
+        self.tui.add_child(self._chat_container)
         self.tui.add_child(self._editor)
+        self.tui.add_child(self._footer)
 
         self.tui.set_focus(self._editor)
 
-    def _update_status(self) -> None:
-        if self._status_bar:
-            self._status_bar = TruncatedText(self._build_status())
-            # Replace the status bar in children (index 2)
-            if len(self.tui.children) > 2:
-                self.tui.children[2] = self._status_bar
+    def _update_footer(self) -> None:
+        if self._footer:
+            if self.agent:
+                self._footer.set_model(self.agent.model_name, self.agent.provider_name)
+            else:
+                self._footer.set_model(None, None)
             self.tui.request_render()
 
     def _overlay_options_below_editor(self) -> OverlayOptions:
@@ -237,9 +247,8 @@ class MiniApp:
         return OverlayOptions(row=row, col=0)
 
     def _add_message(self, component: object) -> None:
-        """Insert a component before the editor (2nd-to-last child)."""
-        idx = len(self.tui.children) - 1  # before editor
-        self.tui.children.insert(idx, component)  # type: ignore[arg-type]
+        """Append a component to the chat container (above editor & footer)."""
+        self._chat_container.add_child(component)  # type: ignore[arg-type]
         self.tui.request_render()
 
     def _on_submit(self, text: str) -> None:
@@ -259,8 +268,8 @@ class MiniApp:
             elif cmd == "clear":
                 if self.agent:
                     self.agent.clear_history()
-                # Remove all children except title, spacer, status, spacer, editor
-                self.tui.children[:] = self.tui.children[:2] + self.tui.children[-3:]
+                # Keep only the header (title + spacer) in chat container
+                self._chat_container.children[:] = self._chat_container.children[:2]
                 self._add_message(Text(_dim("History cleared."), padding_x=1, padding_y=0))
                 self.tui.request_render()
                 return
@@ -292,8 +301,8 @@ class MiniApp:
             self._add_message(Spacer(1))
             return
 
-        # Show user message
-        self._add_message(Text(_dim("> ") + text, padding_x=1, padding_y=0))
+        # Show user message with background (matching original pi-tui userMessageBg)
+        self._add_message(Text(text, padding_x=1, padding_y=1, custom_bg_fn=_user_msg_bg))
         self._add_message(Spacer(1))
 
         asyncio.ensure_future(self._stream_response(text))
@@ -314,9 +323,7 @@ class MiniApp:
         try:
             def stream_handler(update: str) -> None:
                 loader.stop()
-                # Remove loader if still present
-                if loader in self.tui.children:
-                    self.tui.children.remove(loader)
+                self._chat_container.remove_child(loader)
                 md.set_text(update)
                 self.tui.request_render()
 
@@ -325,14 +332,12 @@ class MiniApp:
         except Exception as e:
             logger.exception("Error during agent stream")
             loader.stop()
-            if loader in self.tui.children:
-                self.tui.children.remove(loader)
+            self._chat_container.remove_child(loader)
             md.set_text(_red(f"❌ {e}"))
             self.tui.request_render()
         finally:
             loader.stop()
-            if loader in self.tui.children:
-                self.tui.children.remove(loader)
+            self._chat_container.remove_child(loader)
             self._awaiting_response = False
             self._add_message(Spacer(1))
             self.tui.request_render()
@@ -431,7 +436,7 @@ class MiniApp:
                 self._add_message(
                     Text(_green(f"Switched to {model_id} ({provider_name})."), padding_x=1, padding_y=0)
                 )
-                self._update_status()
+                self._update_footer()
             except Exception as e:
                 self._add_message(Text(_red(f"Failed: {e}"), padding_x=1, padding_y=0))
             self._add_message(Spacer(1))
@@ -448,6 +453,7 @@ class MiniApp:
                 pass
 
         self._setup_ui()
+        self._update_footer()
         self.tui.start()
 
         # Keep running until TUI stops

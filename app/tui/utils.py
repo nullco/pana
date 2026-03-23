@@ -398,7 +398,18 @@ def wrap_text_with_ansi(text: str, width: int) -> list[str]:
 def apply_background_to_line(line: str, width: int, bg_fn: Callable[[str], str]) -> str:
     line_width = visible_width(line)
     padding = max(0, width - line_width)
-    return bg_fn(line + " " * padding)
+    content = line + " " * padding
+
+    # Extract the raw background SGR code from bg_fn so we can re-apply it
+    # after any \x1b[0m full-reset embedded in the content.
+    probe = bg_fn("")
+    m = re.match(r"^(\x1b\[[0-9;]*m)", probe)
+    if m:
+        bg_code = m.group(1)
+        # Re-inject bg_code after every full reset (\x1b[0m) inside content
+        content = content.replace("\x1b[0m", "\x1b[0m" + bg_code)
+
+    return bg_fn(content)
 
 
 # ---------------------------------------------------------------------------
