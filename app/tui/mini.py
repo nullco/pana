@@ -1,16 +1,31 @@
-"""Minimalist terminal UI built on the pi-tui Python backport."""
+"""Minimalist terminal UI — look and feel matches original pi-tui dark theme exactly.
 
+Colors sourced from dark.json (pi-tui):
+  accent       #8abeb7   sage teal  (select prefix/text, list bullet, inline code)
+  border       #5f87ff   blue
+  borderMuted  #505050   dark gray  (editor border)
+  muted        #808080   medium gray (descriptions, scroll info, quotes, hr, code border)
+  dim          #666666   dim gray   (footer, link url, muted decorations)
+  success      #b5bd68   olive green (code blocks)
+  error        #cc6666   muted red
+  warning      #ffff00   yellow
+  mdHeading    #f0c674   warm gold
+  mdLink       #81a2be   steel blue
+  userMsgBg    #343541   dark blue-gray (user message background)
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
 import shutil
-import sys
 from collections.abc import Callable
 
-from pygments import highlight as _pyg_highlight
+from pygments.style import Style
+from pygments.token import (
+    Comment, Error, Keyword, Name, Number, Operator, Punctuation, String, Token
+)
 from pygments.formatters import TerminalTrueColorFormatter
-from pygments.lexers import get_lexer_by_name, guess_lexer
+from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound as _PygClassNotFound
 
 from agents.agent import Agent
@@ -32,122 +47,176 @@ from app.tui.tui import TUI, Container
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# ANSI color helpers
+# OSC 133 semantic zone markers (shell integration — mirrors pi-tui)
 # ---------------------------------------------------------------------------
 
-def _user_msg_bg(s: str) -> str:
-    """Dark blue-gray background matching the original pi-tui userMessageBg (#343541)."""
-    return f"\x1b[48;2;52;53;65m{s}\x1b[49m"
-
-def _cyan(s: str) -> str:
-    return f"\x1b[36m{s}\x1b[0m"
-
-def _dim(s: str) -> str:
-    return f"\x1b[2m{s}\x1b[0m"
-
-def _green(s: str) -> str:
-    return f"\x1b[32m{s}\x1b[0m"
-
-def _red(s: str) -> str:
-    return f"\x1b[31m{s}\x1b[0m"
-
-def _bold(s: str) -> str:
-    return f"\x1b[1m{s}\x1b[0m"
-
-def _italic(s: str) -> str:
-    return f"\x1b[3m{s}\x1b[0m"
-
-def _underline(s: str) -> str:
-    return f"\x1b[4m{s}\x1b[0m"
-
-def _strikethrough(s: str) -> str:
-    return f"\x1b[9m{s}\x1b[0m"
-
-def _yellow(s: str) -> str:
-    return f"\x1b[33m{s}\x1b[0m"
-
-def _magenta(s: str) -> str:
-    return f"\x1b[35m{s}\x1b[0m"
-
-def _gray(s: str) -> str:
-    return f"\x1b[90m{s}\x1b[0m"
-
-def _white(s: str) -> str:
-    return f"\x1b[37m{s}\x1b[0m"
-
-def _identity(s: str) -> str:
-    return s
-
-def _gold(s: str) -> str:
-    return f"\x1b[38;2;240;198;116m{s}\x1b[0m"
-
+_OSC133_ZONE_START = "\x1b]133;A\x07"
+_OSC133_ZONE_END   = "\x1b]133;B\x07"
+_OSC133_ZONE_FINAL = "\x1b]133;C\x07"
 
 # ---------------------------------------------------------------------------
-# Syntax highlighting
+# Core color helpers — exact hex truecolor, fg-only reset (\x1b[39m)
+# Mirrors Theme.fg() / Theme.bg() from theme.js
 # ---------------------------------------------------------------------------
 
-_pyg_formatter = TerminalTrueColorFormatter(style="monokai")
+def _fg(r: int, g: int, b: int) -> Callable[[str], str]:
+    """Return a color function that applies a truecolor fg and resets only fg."""
+    code = f"\x1b[38;2;{r};{g};{b}m"
+    return lambda s: f"{code}{s}\x1b[39m"
+
+def _bg(r: int, g: int, b: int) -> Callable[[str], str]:
+    """Return a color function that applies a truecolor bg and resets only bg."""
+    code = f"\x1b[48;2;{r};{g};{b}m"
+    return lambda s: f"{code}{s}\x1b[49m"
+
+# -- Foreground palette (dark.json resolved) ---------------------------------
+_accent          = _fg(138, 190, 183)   # #8abeb7  sage teal
+_border          = _fg( 95, 135, 255)   # #5f87ff  blue
+_border_muted    = _fg( 80,  80,  80)   # #505050  dark gray  → editor border
+_muted           = _fg(128, 128, 128)   # #808080  medium gray → descriptions, hr, quotes
+_dim             = _fg(102, 102, 102)   # #666666  dim gray   → footer, secondary text
+_success         = _fg(181, 189, 104)   # #b5bd68  olive green → code blocks
+_error           = _fg(204, 102, 102)   # #cc6666  muted red
+_warning         = _fg(255, 255,   0)   # #ffff00  yellow
+_heading         = _fg(240, 198, 116)   # #f0c674  warm gold  → md headings
+_link            = _fg(129, 162, 190)   # #81a2be  steel blue → md links
+_border_accent   = _fg(  0, 215, 255)   # #00d7ff  cyan
+
+# -- Background palette ------------------------------------------------------
+_user_msg_bg_fn  = _bg( 52,  53,  65)   # #343541  user message background
+
+# -- Text attributes — chalk-compatible resets (NOT \x1b[0m full reset) -----
+def _bold(s: str)          -> str: return f"\x1b[1m{s}\x1b[22m"
+def _italic(s: str)        -> str: return f"\x1b[3m{s}\x1b[23m"
+def _underline(s: str)     -> str: return f"\x1b[4m{s}\x1b[24m"
+def _strikethrough(s: str) -> str: return f"\x1b[9m{s}\x1b[29m"
+def _identity(s: str)      -> str: return s
+
+# ---------------------------------------------------------------------------
+# Syntax highlighting — custom Pygments style matching dark.json syntax colors
+# ---------------------------------------------------------------------------
+
+class _PiDarkStyle(Style):
+    """VSCode Dark+-inspired syntax style matching dark.json syntaxXxx colors."""
+    background_color = "#1e1e24"
+    default_style = ""
+    styles = {
+        Token:                        "",
+        Comment:                      "#6A9955",   # syntaxComment
+        Comment.Single:               "#6A9955",
+        Comment.Multiline:            "#6A9955",
+        Keyword:                      "#569CD6",   # syntaxKeyword
+        Keyword.Declaration:          "#569CD6",
+        Keyword.Namespace:            "#569CD6",
+        Keyword.Type:                 "#4EC9B0",   # syntaxType
+        Name.Builtin:                 "#4EC9B0",   # syntaxType
+        Name.Class:                   "#4EC9B0",
+        Name.Function:                "#DCDCAA",   # syntaxFunction
+        Name.Function.Magic:          "#DCDCAA",
+        Name.Attribute:               "#9CDCFE",   # syntaxVariable
+        Name.Variable:                "#9CDCFE",
+        Name.Variable.Instance:       "#9CDCFE",
+        Name.Variable.Class:          "#9CDCFE",
+        Name.Variable.Global:         "#9CDCFE",
+        Name.Namespace:               "#4EC9B0",
+        String:                       "#CE9178",   # syntaxString
+        String.Doc:                   "#CE9178",
+        String.Interpol:              "#CE9178",
+        String.Escape:                "#D7BA7D",
+        Number:                       "#B5CEA8",   # syntaxNumber
+        Number.Integer:               "#B5CEA8",
+        Number.Float:                 "#B5CEA8",
+        Number.Hex:                   "#B5CEA8",
+        Operator:                     "#D4D4D4",   # syntaxOperator
+        Operator.Word:                "#569CD6",
+        Punctuation:                  "#D4D4D4",   # syntaxPunctuation
+        Error:                        "#cc6666",
+    }
+
+_pi_dark_formatter = TerminalTrueColorFormatter(style=_PiDarkStyle)
 
 
 def _highlight_code(code: str, lang: str | None) -> list[str]:
-    """Syntax-highlight *code* using Pygments, matching the original pi-tui behaviour."""
+    """Highlight *code* using the pi-tui dark theme syntax colors.
+
+    Mirrors highlightCode() in theme.js: skips auto-detection when no language
+    is given (unreliable), applies theme's mdCodeBlock color as fallback.
+    """
+    if not lang:
+        # No language → apply mdCodeBlock color (success / #b5bd68) to each line
+        return [_success(line) for line in code.split("\n")]
     try:
-        if lang:
-            lexer = get_lexer_by_name(lang, stripall=True)
-        else:
-            lexer = guess_lexer(code)
+        lexer = get_lexer_by_name(lang, stripall=True)
     except _PygClassNotFound:
-        return code.split("\n")
-    highlighted = _pyg_highlight(code, lexer, _pyg_formatter)
-    # Pygments adds a trailing newline; strip it so we don't get an extra blank line
+        return [_success(line) for line in code.split("\n")]
+    highlighted = _pi_dark_formatter.format(
+        __import__("pygments").lex(code, lexer)  # type: ignore[call-arg]
+    )
+    if highlighted.endswith("\n"):
+        highlighted = highlighted[:-1]
+    return highlighted.split("\n")
+
+
+def _highlight_code_proper(code: str, lang: str | None) -> list[str]:
+    """Properly highlight using pygments highlight() API."""
+    from pygments import highlight as _pyg_highlight
+    if not lang:
+        return [_success(line) for line in code.split("\n")]
+    try:
+        lexer = get_lexer_by_name(lang, stripall=True)
+    except _PygClassNotFound:
+        return [_success(line) for line in code.split("\n")]
+    highlighted = _pyg_highlight(code, lexer, _pi_dark_formatter)
     if highlighted.endswith("\n"):
         highlighted = highlighted[:-1]
     return highlighted.split("\n")
 
 
 # ---------------------------------------------------------------------------
-# Themes
+# Themes — all colors from dark.json
 # ---------------------------------------------------------------------------
 
+# SelectList: accent for selected items, muted (#808080) for descriptions
 _select_list_theme = SLTheme(
-    selected_prefix=_cyan,
-    selected_text=_bold,
-    description=_dim,
-    scroll_info=_dim,
-    no_match=_dim,
+    selected_prefix=_accent,        # theme.fg("accent", …)  #8abeb7
+    selected_text=_accent,          # theme.fg("accent", …)  #8abeb7
+    description=_muted,             # theme.fg("muted", …)   #808080
+    scroll_info=_muted,             # theme.fg("muted", …)   #808080
+    no_match=_muted,                # theme.fg("muted", …)   #808080
 )
 
 _editor_select_theme = SelectListTheme(
-    selected_prefix=_cyan,
-    selected_text=_bold,
-    description=_dim,
-    scroll_info=_dim,
-    no_match=_dim,
+    selected_prefix=_accent,
+    selected_text=_accent,
+    description=_muted,
+    scroll_info=_muted,
+    no_match=_muted,
 )
 
+# Editor: borderMuted (#505050 dark gray)
 _editor_theme = EditorTheme(
-    border_color=_dim,
+    border_color=_border_muted,     # theme.fg("borderMuted", …)  #505050
     select_list=_editor_select_theme,
 )
 
+# Markdown: exact per-role colors from dark.json
 _md_theme = MarkdownTheme(
-    heading=_gold,
-    link=_cyan,
-    link_url=_dim,
-    code=_yellow,
-    code_block=_identity,
-    code_block_border=_dim,
-    quote=_dim,
-    quote_border=_dim,
-    hr=_dim,
-    list_bullet=_cyan,
+    heading=_heading,               # mdHeading  #f0c674
+    link=_link,                     # mdLink     #81a2be
+    link_url=_dim,                  # mdLinkUrl  #666666 (dimGray)
+    code=_accent,                   # mdCode     #8abeb7 (accent)
+    code_block=_success,            # mdCodeBlock #b5bd68 (green)
+    code_block_border=_muted,       # mdCodeBlockBorder #808080
+    quote=_muted,                   # mdQuote    #808080
+    quote_border=_muted,            # mdQuoteBorder #808080
+    hr=_muted,                      # mdHr       #808080
+    list_bullet=_accent,            # mdListBullet #8abeb7 (accent)
     bold=_bold,
     italic=_italic,
     strikethrough=_strikethrough,
     underline=_underline,
-    highlight_code=_highlight_code,
+    highlight_code=_highlight_code_proper,
 )
-
 
 # ---------------------------------------------------------------------------
 # Commands
@@ -173,7 +242,26 @@ def _resolve_command(cmd: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# App state
+# UserMessage component — mirrors UserMessageComponent with OSC 133 zones
+# ---------------------------------------------------------------------------
+
+class _UserMessage(Text):
+    """User chat bubble: userMessageBg background + OSC 133 semantic zone markers."""
+
+    def render(self, width: int) -> list[str]:
+        lines = super().render(width)
+        if not lines:
+            return lines
+        # Copy to avoid mutating the cached list from Text.render()
+        lines = list(lines)
+        # Wrap with OSC 133 shell-integration markers (mirrors user-message.js)
+        lines[0] = _OSC133_ZONE_START + lines[0]
+        lines[-1] = lines[-1] + _OSC133_ZONE_END + _OSC133_ZONE_FINAL
+        return lines
+
+
+# ---------------------------------------------------------------------------
+# App
 # ---------------------------------------------------------------------------
 
 
@@ -199,7 +287,7 @@ class MiniApp:
         self._awaiting_response = False
 
     def _setup_ui(self) -> None:
-        # Footer (cwd + model info, rendered below editor)
+        # Footer — uses dim (#666666) for all text, matching theme.fg("dim", …)
         self._footer = Footer(dim_fn=_dim)
 
         # Detect fd for fuzzy file completion
@@ -214,7 +302,7 @@ class MiniApp:
             commands=slash_commands, fd_path=fd_path,
         )
 
-        # Editor
+        # Editor — borderMuted (#505050) border, accent autocomplete theme
         self._editor = Editor(
             self.tui, _editor_theme,
             EditorOptions(padding_x=0, autocomplete_max_visible=5),
@@ -222,9 +310,9 @@ class MiniApp:
         self._editor.set_autocomplete_provider(autocomplete)
         self._editor.on_submit = self._on_submit
 
-        # Build layout matching original pi-tui tree
+        # Header: accent-colored title (mirrors pi-tui header style)
         self._chat_container.add_child(
-            Text(_bold(_cyan("Agent 007")) + " — mini mode", padding_x=0, padding_y=0)
+            Text(_bold(_accent("Agent 007")) + " — mini mode", padding_x=0, padding_y=0)
         )
         self._chat_container.add_child(Spacer(1))
 
@@ -245,10 +333,7 @@ class MiniApp:
             self.tui.request_render()
 
     def _show_selector(self, component: object, focus_target: object | None = None) -> Callable[[], None]:
-        """Replace the editor with a selector component, matching the original pi-tui pattern.
-
-        Returns a ``done`` callback that restores the editor.
-        """
+        """Replace the editor with a selector component."""
         self._editor_container.clear()
         self._editor_container.add_child(component)  # type: ignore[arg-type]
         self.tui.set_focus(focus_target or component)  # type: ignore[arg-type]
@@ -263,7 +348,6 @@ class MiniApp:
         return done
 
     def _add_message(self, component: object) -> None:
-        """Append a component to the chat container (above editor & footer)."""
         self._chat_container.add_child(component)  # type: ignore[arg-type]
         self.tui.request_render()
 
@@ -275,7 +359,7 @@ class MiniApp:
         if self._editor:
             self._editor.add_to_history(text)
 
-        # Handle slash commands
+        # Slash commands
         if text.startswith("/"):
             cmd = _resolve_command(text)
             if cmd in _QUIT_ALIASES:
@@ -284,7 +368,6 @@ class MiniApp:
             elif cmd == "clear":
                 if self.agent:
                     self.agent.clear_history()
-                # Keep only the header (title + spacer) in chat container
                 self._chat_container.children[:] = self._chat_container.children[:2]
                 self._add_message(Text(_dim("History cleared."), padding_x=1, padding_y=0))
                 self.tui.request_render()
@@ -298,13 +381,13 @@ class MiniApp:
             elif cmd == "help":
                 help_lines = [_bold("Commands:")]
                 for c, desc in COMMANDS.items():
-                    help_lines.append(f"  {_cyan(f'/{c:<8}')} — {desc}")
+                    help_lines.append(f"  {_accent(f'/{c:<8}')} — {desc}")
                 self._add_message(Text("\n".join(help_lines), padding_x=1, padding_y=0))
                 self._add_message(Spacer(1))
                 return
             else:
                 self._add_message(
-                    Text(_red(f"Unknown command: {text}"), padding_x=1, padding_y=0)
+                    Text(_error(f"Unknown command: {text}"), padding_x=1, padding_y=0)
                 )
                 self._add_message(Spacer(1))
                 return
@@ -312,13 +395,13 @@ class MiniApp:
         # Chat message
         if not self.agent:
             self._add_message(
-                Text(_red("❌ Please select a model first (/model)"), padding_x=1, padding_y=0)
+                Text(_error("❌ Please select a model first (/model)"), padding_x=1, padding_y=0)
             )
             self._add_message(Spacer(1))
             return
 
-        # Show user message with background (matching original pi-tui userMessageBg)
-        self._add_message(Text(text, padding_x=1, padding_y=1, custom_bg_fn=_user_msg_bg))
+        # User message bubble: userMessageBg background + OSC 133 zones
+        self._add_message(_UserMessage(text, padding_x=1, padding_y=1, custom_bg_fn=_user_msg_bg_fn))
         self._add_message(Spacer(1))
 
         asyncio.ensure_future(self._stream_response(text))
@@ -328,11 +411,11 @@ class MiniApp:
             return
         self._awaiting_response = True
 
-        # Add loader
-        loader = Loader(self.tui, _cyan, _dim, "Thinking...")
+        # Loader: accent spinner, dim message (mirrors BorderedLoader colors)
+        loader = Loader(self.tui, _accent, _dim, "Thinking...")
         self._add_message(loader)
 
-        # Add markdown component (will be updated during streaming)
+        # Markdown response component
         md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
         self._add_message(md)
 
@@ -349,7 +432,7 @@ class MiniApp:
             logger.exception("Error during agent stream")
             loader.stop()
             self._chat_container.remove_child(loader)
-            md.set_text(_red(f"❌ {e}"))
+            md.set_text(_error(f"❌ {e}"))
             self.tui.request_render()
         finally:
             loader.stop()
@@ -361,7 +444,7 @@ class MiniApp:
     async def _cmd_login(self) -> None:
         providers = get_providers()
         if not providers:
-            self._add_message(Text(_red("No providers available."), padding_x=1, padding_y=0))
+            self._add_message(Text(_error("No providers available."), padding_x=1, padding_y=0))
             self._add_message(Spacer(1))
             return
 
@@ -389,14 +472,12 @@ class MiniApp:
 
         if selected_provider:
             try:
-                await get_provider(selected_provider).authenticate(
-                    lambda result: None
-                )
+                await get_provider(selected_provider).authenticate(lambda result: None)
                 self._add_message(
-                    Text(_green(f"Authenticated with {selected_provider}."), padding_x=1, padding_y=0)
+                    Text(_success(f"Authenticated with {selected_provider}."), padding_x=1, padding_y=0)
                 )
             except Exception as e:
-                self._add_message(Text(_red(f"Auth failed: {e}"), padding_x=1, padding_y=0))
+                self._add_message(Text(_error(f"Auth failed: {e}"), padding_x=1, padding_y=0))
             self._add_message(Spacer(1))
 
     async def _cmd_model(self) -> None:
@@ -410,7 +491,7 @@ class MiniApp:
 
         if not options:
             self._add_message(
-                Text(_red("No models available. Login first (/login)."), padding_x=1, padding_y=0)
+                Text(_error("No models available. Login first (/login)."), padding_x=1, padding_y=0)
             )
             self._add_message(Spacer(1))
             return
@@ -448,11 +529,11 @@ class MiniApp:
                 state.set("provider", provider_name)
                 state.set("model", model_id)
                 self._add_message(
-                    Text(_green(f"Switched to {model_id} ({provider_name})."), padding_x=1, padding_y=0)
+                    Text(_success(f"Switched to {model_id} ({provider_name})."), padding_x=1, padding_y=0)
                 )
                 self._update_footer()
             except Exception as e:
-                self._add_message(Text(_red(f"Failed: {e}"), padding_x=1, padding_y=0))
+                self._add_message(Text(_error(f"Failed: {e}"), padding_x=1, padding_y=0))
             self._add_message(Spacer(1))
 
     async def run(self) -> None:
@@ -470,7 +551,6 @@ class MiniApp:
         self._update_footer()
         self.tui.start()
 
-        # Keep running until TUI stops
         try:
             while not self.tui.stopped:
                 await asyncio.sleep(0.1)
