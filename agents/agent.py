@@ -2,6 +2,7 @@ import logging
 
 from pydantic_ai.agent import Agent as PydanticAgent
 
+from agents.context import collect_agents_md
 from ai.providers.model import Model
 
 logger = logging.getLogger(__name__)
@@ -11,8 +12,15 @@ class Agent:
 
     def __init__(self, model: Model) -> None:
         self._model = model
-        self._agent = PydanticAgent(model=model.instance)
+        self._system_prompt = collect_agents_md()
+        self._agent = self._build_agent()
         self._message_history = None
+
+    def _build_agent(self) -> PydanticAgent:
+        kwargs = {"model": self._model.instance}
+        if self._system_prompt:
+            kwargs["system_prompt"] = self._system_prompt
+        return PydanticAgent(**kwargs)
 
     @property
     def model_name(self) -> str:
@@ -24,10 +32,12 @@ class Agent:
 
     def set_model(self, model: Model) -> None:
         self._model = model
-        self._agent.model = model.instance
+        self._agent = self._build_agent()
 
     def clear_history(self) -> None:
         self._message_history = None
+        self._system_prompt = collect_agents_md()
+        self._agent = self._build_agent()
 
     async def stream(self, user_input: str, stream_handler) -> None:
         if self._model.provider.should_reauthenticate():
