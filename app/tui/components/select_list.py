@@ -31,9 +31,20 @@ class SelectListTheme:
 
 
 @dataclass
+class SelectListTruncatePrimaryContext:
+    """Context passed to custom truncate_primary callbacks."""
+    text: str
+    max_width: int
+    column_width: int
+    item: SelectItem
+    is_selected: bool
+
+
+@dataclass
 class SelectListLayoutOptions:
     min_primary_column_width: int | None = None
     max_primary_column_width: int | None = None
+    truncate_primary: Callable[[SelectListTruncatePrimaryContext], str] | None = None
 
 
 class SelectList:
@@ -110,6 +121,26 @@ class SelectList:
     def _normalize_description(self, desc: str) -> str:
         return desc.replace("\r\n", " ").replace("\n", " ")
 
+    def _truncate_primary(
+        self, item: SelectItem, is_selected: bool, max_width: int, column_width: int
+    ) -> str:
+        """Truncate the primary column text, using custom callback if provided."""
+        display_value = item.label
+        if self._layout.truncate_primary:
+            truncated = self._layout.truncate_primary(
+                SelectListTruncatePrimaryContext(
+                    text=display_value,
+                    max_width=max_width,
+                    column_width=column_width,
+                    item=item,
+                    is_selected=is_selected,
+                )
+            )
+        else:
+            truncated = truncate_to_width(display_value, max_width, "")
+        # Always enforce the max_width limit
+        return truncate_to_width(truncated, max_width, "")
+
     def render(self, width: int) -> list[str]:
         result: list[str] = []
 
@@ -154,22 +185,37 @@ class SelectList:
             remaining_for_desc = avail - primary_col_w
 
             if desc_text and width > 40 and remaining_for_desc >= MIN_DESCRIPTION_WIDTH:
-                label = truncate_to_width(item.label, primary_col_w - PRIMARY_COLUMN_GAP)
-                pad = primary_col_w - visible_width(label)
-                label_padded = label + " " * pad
-                desc_rendered = self._theme.description(truncate_to_width(desc_text, remaining_for_desc))
-                if is_selected:
-                    label_padded = self._theme.selected_text(label_padded)
-                line = f"{prefix}{label_padded}{desc_rendered}"
+                effective_col_w = max(1, min(primary_col_w, avail - 4))
+                max_primary_w = max(1, effective_col_w - PRIMARY_COLUMN_GAP)
+                label = self._truncate_primary(item, is_selected, max_primary_w, effective_col_w)
+                label_w = visible_width(label)
+                pad = " " * max(1, effective_col_w - label_w)
+                desc_start = prefix_w + label_w + len(pad)
+                desc_avail = width - desc_start - 2
+                if desc_avail > MIN_DESCRIPTION_WIDTH:
+                    desc_truncated = truncate_to_width(desc_text, desc_avail, "")
+                    if is_selected:
+                        line = self._theme.selected_text(f"{prefix}{label}{pad}{desc_truncated}")
+                    else:
+                        line = f"{prefix}{label}{self._theme.description(pad + desc_truncated)}"
+                else:
+                    # Fall through to single-column
+                    max_w = avail - 2
+                    label = self._truncate_primary(item, is_selected, max_w, max_w)
+                    if is_selected:
+                        line = self._theme.selected_text(f"{prefix}{label}")
+                    else:
+                        line = f"{prefix}{label}"
             else:
+                max_w = avail - 2
+                label = self._truncate_primary(item, is_selected, max_w, max_w)
                 if desc_text:
                     desc_rendered = self._theme.description(f" — {desc_text}")
                     desc_w = visible_width(desc_rendered)
                     label_avail = max(1, avail - desc_w)
-                    label = truncate_to_width(item.label, label_avail)
+                    label = self._truncate_primary(item, is_selected, label_avail, label_avail)
                 else:
                     desc_rendered = ""
-                    label = truncate_to_width(item.label, avail)
 
                 if is_selected:
                     label = self._theme.selected_text(label)

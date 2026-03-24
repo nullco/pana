@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import subprocess
 from dataclasses import dataclass
-from os.path import basename, dirname, expanduser, join
+from os.path import basename, dirname, expanduser, isdir, join
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -369,19 +369,63 @@ class CombinedAutocompleteProvider:
         suggestions.sort(key=lambda s: (not s.value.endswith("/"), s.label.lower()))
         return suggestions
 
+    @staticmethod
+    def _to_display_path(value: str) -> str:
+        """Normalize path separators to forward slashes."""
+        return value.replace("\\", "/")
+
+    def _resolve_scoped_fuzzy_query(self, raw_query: str) -> dict | None:
+        """Resolve a query like 'src/foo' into a scoped directory search.
+
+        Returns {'base_dir': str, 'query': str, 'display_base': str} or None.
+        """
+        normalized = self._to_display_path(raw_query)
+        slash_idx = normalized.rfind("/")
+        if slash_idx == -1:
+            return None
+
+        display_base = normalized[: slash_idx + 1]
+        query = normalized[slash_idx + 1 :]
+
+        if display_base.startswith("~/"):
+            base_dir = self._expand_home(display_base)
+        elif display_base.startswith("/"):
+            base_dir = display_base
+        else:
+            base_dir = join(self._base_path, display_base)
+
+        try:
+            if not isdir(base_dir):
+                return None
+        except OSError:
+            return None
+
+        return {"base_dir": base_dir, "query": query, "display_base": display_base}
+
+    @staticmethod
+    def _scoped_path_for_display(display_base: str, relative_path: str) -> str:
+        """Build a display path by combining the display base with a relative path."""
+        normalized = relative_path.replace("\\", "/")
+        if display_base == "/":
+            return f"/{normalized}"
+        return f"{display_base.replace(chr(92), '/')}{normalized}"
+
     def _get_fuzzy_file_suggestions(
         self, query: str, *, is_quoted: bool
     ) -> list[AutocompleteItem]:
         if not self._fd_path:
             return []
         try:
-            entries = _walk_with_fd(self._base_path, self._fd_path, query, 100)
+            scoped = self._resolve_scoped_fuzzy_query(query)
+            fd_base_dir = scoped["base_dir"] if scoped else self._base_path
+            fd_query = scoped["query"] if scoped else query
+            entries = _walk_with_fd(fd_base_dir, self._fd_path, fd_query, 100)
         except Exception:
             return []
 
         scored: list[tuple[str, bool, float]] = []
         for path, is_dir in entries:
-            score = self._score_entry(path, query, is_dir) if query else 1.0
+            score = self._score_entry(path, fd_query, is_dir) if fd_query else 1.0
             if score > 0:
                 scored.append((path, is_dir, score))
 
@@ -390,11 +434,16 @@ class CombinedAutocompleteProvider:
         for path, is_dir, _ in scored[:20]:
             norm = path.rstrip("/")
             name = basename(norm)
-            comp_path = f"{norm}/" if is_dir else norm
+            display_path = (
+                self._scoped_path_for_display(scoped["display_base"], norm)
+                if scoped
+                else norm
+            )
+            comp_path = f"{display_path}/" if is_dir else display_path
             value = _build_completion_value(
                 comp_path, is_directory=is_dir, is_at_prefix=True, is_quoted_prefix=is_quoted
             )
-            suggestions.append(AutocompleteItem(value=value, label=name + ("/" if is_dir else ""), description=norm))
+            suggestions.append(AutocompleteItem(value=value, label=name + ("/" if is_dir else ""), description=display_path))
         return suggestions
 
     @staticmethod

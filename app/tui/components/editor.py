@@ -44,7 +44,89 @@ def _graphemes(text: str) -> list[str]:
     return list(grapheme.graphemes(text))
 
 
-def word_wrap_line(line: str, max_width: int) -> list[dict]:
+# Paste marker patterns
+_PASTE_MARKER_REGEX = re.compile(r"\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]")
+_PASTE_MARKER_SINGLE = re.compile(r"^\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]$")
+
+
+def _is_paste_marker(segment: str) -> bool:
+    """Check if a string is a paste marker."""
+    return len(segment) >= 10 and _PASTE_MARKER_SINGLE.match(segment) is not None
+
+
+def _segment_with_markers(text: str, valid_ids: set[int]) -> list[dict]:
+    """Segment text with paste-marker awareness.
+
+    Merges graphemes within paste markers (with valid IDs) into single
+    atomic segments so that cursor movement, deletion, word-wrap, etc.
+    treat paste markers as single units.
+
+    Returns a list of dicts with keys 'segment' and 'index', mimicking
+    the Intl.Segmenter interface from the original TS implementation.
+    """
+    if not valid_ids or "[paste #" not in text:
+        return [{"segment": g, "index": i}
+                for i, g in _graphemes_with_indices(text)]
+
+    # Find all marker spans with valid IDs
+    markers: list[tuple[int, int]] = []
+    for m in _PASTE_MARKER_REGEX.finditer(text):
+        pid = int(m.group(1))
+        if pid in valid_ids:
+            markers.append((m.start(), m.end()))
+
+    if not markers:
+        return [{"segment": g, "index": i}
+                for i, g in _graphemes_with_indices(text)]
+
+    # Build merged segment list
+    base_segments = list(_graphemes_with_indices(text))
+    result: list[dict] = []
+    marker_idx = 0
+
+    for char_idx, g in base_segments:
+        # Skip past markers entirely before this segment
+        while marker_idx < len(markers) and markers[marker_idx][1] <= char_idx:
+            marker_idx += 1
+
+        marker = markers[marker_idx] if marker_idx < len(markers) else None
+        if marker and char_idx >= marker[0] and char_idx < marker[1]:
+            # This segment falls inside a marker
+            if char_idx == marker[0]:
+                # First segment of marker: emit merged segment
+                marker_text = text[marker[0]:marker[1]]
+                result.append({"segment": marker_text, "index": marker[0]})
+            # Otherwise skip (already merged)
+        else:
+            result.append({"segment": g, "index": char_idx})
+
+    return result
+
+
+def _graphemes_with_indices(text: str) -> list[tuple[int, int]]:
+    """Return list of (char_index, grapheme_str) pairs."""
+    result: list[tuple[int, str]] = []
+    pos = 0
+    for g in grapheme.graphemes(text):
+        result.append((pos, g))
+        pos += len(g)
+    return result
+
+
+def word_wrap_line(
+    line: str,
+    max_width: int,
+    pre_segmented: list[dict] | None = None,
+) -> list[dict]:
+    """Split a line into word-wrapped chunks.
+
+    Args:
+        line: The text line to wrap
+        max_width: Maximum visible width per chunk
+        pre_segmented: Optional pre-segmented list of dicts with 'segment' and
+                       'index' keys (e.g. with paste-marker awareness).
+                       When omitted, the default grapheme segmenter is used.
+    """
     if not line or max_width <= 0:
         return [{"text": "", "start_index": 0, "end_index": 0}]
     lw = visible_width(line)
@@ -52,18 +134,22 @@ def word_wrap_line(line: str, max_width: int) -> list[dict]:
         return [{"text": line, "start_index": 0, "end_index": len(line)}]
 
     chunks: list[dict] = []
-    segs = list(grapheme.graphemes(line))
+
+    if pre_segmented is not None:
+        segs = [s["segment"] for s in pre_segmented]
+        char_indices = [s["index"] for s in pre_segmented]
+    else:
+        segs = list(grapheme.graphemes(line))
+        char_indices = []
+        pos = 0
+        for seg in segs:
+            char_indices.append(pos)
+            pos += len(seg)
+
     current_width = 0
     chunk_start = 0
     wrap_opp_index = -1
     wrap_opp_width = 0
-
-    # Map grapheme index to char index
-    char_indices: list[int] = []
-    pos = 0
-    for seg in segs:
-        char_indices.append(pos)
-        pos += len(seg)
 
     for i, seg in enumerate(segs):
         g_width = visible_width(seg)
@@ -142,6 +228,15 @@ class Editor:
         self.on_change: Callable[[str], None] | None = None
         self.disable_submit = False
 
+    @property
+    def _valid_paste_ids(self) -> set[int]:
+        """Set of currently valid paste IDs, for marker-aware segmentation."""
+        return set(self._pastes.keys())
+
+    def _segment(self, text: str) -> list[dict]:
+        """Segment text with paste-marker awareness, only merging markers with valid IDs."""
+        return _segment_with_markers(text, self._valid_paste_ids)
+
     def get_padding_x(self) -> int:
         return self._padding_x
 
@@ -151,6 +246,9 @@ class Editor:
 
     def set_autocomplete_provider(self, provider: AutocompleteProvider) -> None:
         self._autocomplete_provider = provider
+
+    def set_autocomplete_max_visible(self, max_visible: int) -> None:
+        self._autocomplete_max_visible = max(3, min(20, max_visible))
 
     def add_to_history(self, text: str) -> None:
         trimmed = text.strip()
@@ -297,7 +395,8 @@ class Editor:
                     "cursor_pos": self._cursor_col if is_current else None,
                 })
             else:
-                chunks = word_wrap_line(line, content_width)
+                pre_seg = self._segment(line) if self._pastes else None
+                chunks = word_wrap_line(line, content_width, pre_segmented=pre_seg)
                 for ci, chunk in enumerate(chunks):
                     has_cursor = False
                     adj_pos = None
@@ -374,9 +473,9 @@ class Editor:
             if kb.matches(data, "tui.input.tab"):
                 sel = self._autocomplete_list.get_selected_item()
                 if sel and self._autocomplete_provider:
+                    should_chain = self._should_chain_slash_autocomplete_on_tab()
                     self._push_undo()
                     self._last_action = None
-                    is_slash_cmd = self._autocomplete_prefix.startswith("/")
                     r = self._autocomplete_provider.apply_completion(
                         self._lines, self._cursor_line, self._cursor_col,
                         sel, self._autocomplete_prefix,
@@ -388,7 +487,7 @@ class Editor:
                     if self.on_change:
                         self.on_change(self.get_text())
                     # Chain into argument completions for slash commands
-                    if is_slash_cmd:
+                    if should_chain and self._is_bare_completed_slash_at_cursor():
                         self._try_trigger_autocomplete()
                 return
             if kb.matches(data, "tui.select.confirm"):
@@ -467,6 +566,10 @@ class Editor:
             or data == "\x1b[13;2~"
             or (data == "\n" and len(data) == 1)
         ):
+            if self._should_submit_on_backslash_enter(data, kb):
+                self._handle_backspace()
+                self._submit()
+                return
             self._add_new_line()
             return
 
@@ -560,8 +663,18 @@ class Editor:
         if self.on_change:
             self.on_change(self.get_text())
 
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """Normalize text for editor storage.
+
+        - Normalize line endings (\\r\\n and \\r -> \\n)
+        - Expand tabs to 4 spaces
+        """
+        return text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ")
+
     def _set_text_internal(self, text: str) -> None:
-        lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        normalized = self._normalize_text(text)
+        lines = normalized.split("\n")
         self._lines = lines if lines else [""]
         self._cursor_line = len(self._lines) - 1
         self._set_cursor_col(len(self._lines[self._cursor_line]))
@@ -570,7 +683,7 @@ class Editor:
             self.on_change(self.get_text())
 
     def _insert_text_internal(self, text: str) -> None:
-        normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+        normalized = self._normalize_text(text)
         inserted = normalized.split("\n")
         current = self._lines[self._cursor_line]
         before = current[:self._cursor_col]
@@ -1032,6 +1145,35 @@ class Editor:
 
     def _is_empty(self) -> bool:
         return len(self._lines) == 1 and self._lines[0] == ""
+
+    def _should_submit_on_backslash_enter(self, data: str, kb: Any) -> bool:
+        """Check if backslash+enter should submit (when submit is mapped to shift+enter)."""
+        if self.disable_submit:
+            return False
+        if not matches_key(data, "enter"):
+            return False
+        submit_keys = kb.get_keys("tui.input.submit")
+        has_shift_enter = "shift+enter" in submit_keys or "shift+return" in submit_keys
+        if not has_shift_enter:
+            return False
+        current = self._lines[self._cursor_line] or ""
+        return self._cursor_col > 0 and current[self._cursor_col - 1 : self._cursor_col] == "\\"
+
+    def _should_chain_slash_autocomplete_on_tab(self) -> bool:
+        """Check if tab selection should chain into slash argument completions."""
+        if self._autocomplete_state != "regular":
+            return False
+        current = self._lines[self._cursor_line] or ""
+        before = current[: self._cursor_col]
+        return self._is_in_slash_context(before) and " " not in before.strip()
+
+    def _is_bare_completed_slash_at_cursor(self) -> bool:
+        """Check if cursor is right after a completed bare slash command (e.g. '/model ')."""
+        current = self._lines[self._cursor_line] or ""
+        if self._cursor_col != len(current):
+            return False
+        before = current[: self._cursor_col].lstrip()
+        return bool(re.match(r"^/\S+ $", before))
 
     def _on_first_visual_line(self) -> bool:
         vl = self._build_visual_line_map(self._last_width)
