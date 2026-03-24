@@ -20,18 +20,24 @@ import logging
 import shutil
 from collections.abc import Callable
 
-from pygments.style import Style
-from pygments.token import (
-    Comment, Error, Keyword, Name, Number, Operator, Punctuation, String, Token
-)
 from pygments.formatters import TerminalTrueColorFormatter
 from pygments.lexers import get_lexer_by_name
+from pygments.style import Style
+from pygments.token import (
+    Comment,
+    Error,
+    Keyword,
+    Name,
+    Number,
+    Operator,
+    Punctuation,
+    String,
+    Token,
+)
 from pygments.util import ClassNotFound as _PygClassNotFound
 
 from agents.agent import Agent
 from ai.providers.factory import get_provider, get_providers
-from state import state
-
 from app.tui.autocomplete import CombinedAutocompleteProvider, SlashCommand
 from app.tui.components.editor import Editor, EditorOptions, EditorTheme, SelectListTheme
 from app.tui.components.footer import Footer
@@ -43,6 +49,7 @@ from app.tui.components.spacer import Spacer
 from app.tui.components.text import Text
 from app.tui.terminal import ProcessTerminal
 from app.tui.tui import TUI, Container
+from state import state
 
 logger = logging.getLogger(__name__)
 

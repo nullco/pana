@@ -7,28 +7,25 @@ from __future__ import annotations
 
 import base64
 import struct
-import re
 from typing import Callable
 
 from app.tui.terminal_image import (
-    is_image_line,
-    encode_kitty,
-    encode_iterm2,
-    delete_kitty_image,
-    delete_all_kitty_images,
-    allocate_image_id,
-    get_png_dimensions,
-    get_jpeg_dimensions,
-    get_gif_dimensions,
-    get_webp_dimensions,
-    get_image_dimensions,
-    calculate_image_rows,
-    image_fallback,
-    ImageDimensions,
     CellDimensions,
+    ImageDimensions,
+    allocate_image_id,
+    calculate_image_rows,
+    delete_all_kitty_images,
+    delete_kitty_image,
+    encode_iterm2,
+    encode_kitty,
+    get_gif_dimensions,
+    get_image_dimensions,
+    get_jpeg_dimensions,
+    get_png_dimensions,
+    image_fallback,
+    is_image_line,
 )
 from app.tui.tui import TUI, OverlayOptions
-
 
 # ---------------------------------------------------------------------------
 # Stub terminal

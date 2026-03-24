@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from app.tui.utils import _grapheme_width, visible_width
 
-
 # -- Regional indicator pairs (flags) --------------------------------------
 
 def test_regional_indicator_pair_width_2():

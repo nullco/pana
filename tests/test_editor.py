@@ -9,9 +9,13 @@ from __future__ import annotations
 from typing import Callable
 
 from app.tui.autocomplete import AutocompleteItem, CombinedAutocompleteProvider, SlashCommand
+from app.tui.components.editor import (
+    Editor,
+    EditorTheme,
+    SelectListTheme,
+    word_wrap_line,
+)
 from app.tui.tui import TUI
-from app.tui.components.editor import Editor, EditorTheme, SelectListTheme, EditorOptions, word_wrap_line
-
 
 # ---------------------------------------------------------------------------
 # Minimal stub terminal

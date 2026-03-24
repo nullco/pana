@@ -3,6 +3,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+
 import requests
 
 logger = logging.getLogger(__name__)

@@ -4,8 +4,7 @@ from __future__ import annotations
 import re
 
 from app.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
-from app.tui.utils import visible_width, wrap_text_with_ansi
-
+from app.tui.utils import visible_width
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -442,7 +441,8 @@ def test_no_trailing_blank_after_blockquote() -> None:
 
 
 def test_lazy_continuation_blockquote() -> None:
-    _magenta = lambda s: f"\x1b[35m{s}\x1b[39m"
+    def _magenta(s):
+        return f"\x1b[35m{s}\x1b[39m"
     style = DefaultTextStyle(color=_magenta)
     lines = _render(">Foo\nbar", style=style)
     border_lines = [l for l in lines if _strip_ansi(l).startswith("│ ")]

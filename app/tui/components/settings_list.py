@@ -1,13 +1,13 @@
 """Settings panel with value cycling and submenus."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
+from app.tui.components.input import Input
 from app.tui.fuzzy import fuzzy_filter
 from app.tui.keybindings import get_editor_keybindings
 from app.tui.utils import truncate_to_width, visible_width, wrap_text_with_ansi
-from app.tui.components.input import Input
 
 
 @dataclass

@@ -7,12 +7,9 @@ re-renders from scratch via ``fullRender(true)``.
 
 from __future__ import annotations
 
-import re
 from typing import Callable
 
 from app.tui.tui import TUI
-from app.tui.utils import visible_width
-
 
 # ---------------------------------------------------------------------------
 # Minimal stub terminal
@@ -133,7 +130,7 @@ def test_resize_narrower_triggers_full_clear() -> None:
     tui._do_render()
 
     buf = term.last_write()
-    assert _FULL_CLEAR in buf, f"Expected full clear sequence in output"
+    assert _FULL_CLEAR in buf, "Expected full clear sequence in output"
 
 
 def test_resize_wider_triggers_full_clear() -> None:
@@ -146,7 +143,7 @@ def test_resize_wider_triggers_full_clear() -> None:
     tui._do_render()
 
     buf = term.last_write()
-    assert _FULL_CLEAR in buf, f"Expected full clear sequence in output"
+    assert _FULL_CLEAR in buf, "Expected full clear sequence in output"
 
 
 def test_resize_height_only_triggers_full_clear() -> None:

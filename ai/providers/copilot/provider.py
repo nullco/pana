@@ -1,13 +1,21 @@
 import asyncio
 import time
-from ai.providers.provider import Provider
+
 from openai import AsyncOpenAI
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
-from state import state
+
 from ai.providers.model import Model
-from .auth import COPILOT_HEADERS, get_copilot_base_url, \
-    start_device_flow, poll_for_token, exchange_for_copilot_token
+from ai.providers.provider import Provider
+from state import state
+
+from .auth import (
+    COPILOT_HEADERS,
+    exchange_for_copilot_token,
+    get_copilot_base_url,
+    poll_for_token,
+    start_device_flow,
+)
 
 
 class CopilotProvider(Provider):

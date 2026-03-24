@@ -10,7 +10,6 @@ import re
 from typing import Callable
 
 from app.tui.tui import TUI, OverlayMargin, OverlayOptions
-from app.tui.utils import visible_width
 
 # ---------------------------------------------------------------------------
 # ANSI helpers

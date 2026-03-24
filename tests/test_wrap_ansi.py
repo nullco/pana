@@ -1,9 +1,8 @@
-from __future__ import annotations
-
 """Tests for wrap_text_with_ansi and visible_width ported from wrap-ansi.test.ts."""
 
-from app.tui.utils import visible_width, wrap_text_with_ansi
+from __future__ import annotations
 
+from app.tui.utils import visible_width, wrap_text_with_ansi
 
 # ---------------------------------------------------------------------------
 # Underline styling

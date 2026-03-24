@@ -15,7 +15,6 @@ from app.tui.keys import (
     set_kitty_protocol_active,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixture: ensure Kitty protocol state is restored after each test
 # ---------------------------------------------------------------------------

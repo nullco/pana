@@ -28,6 +28,7 @@ line-length = 100
 
 [tool.ruff.lint]
 extend-select = ["I"]
+ignore = ["E741"]
 
 [tool.black]
 line-length = 100

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from app.tui.stdin_buffer import StdinBuffer, extract_complete_sequences
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

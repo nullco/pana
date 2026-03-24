@@ -1,8 +1,8 @@
-from pydantic_ai.agent import Agent as PydanticAgent
 import logging
 
-from ai.providers.model import Model
+from pydantic_ai.agent import Agent as PydanticAgent
 
+from ai.providers.model import Model
 
 logger = logging.getLogger(__name__)
 

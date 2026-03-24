@@ -13,9 +13,6 @@ Covers:
 """
 from __future__ import annotations
 
-import re
-from typing import Callable
-
 from app.tui.autocomplete import (
     AutocompleteItem,
     CombinedAutocompleteProvider,
@@ -34,13 +31,14 @@ from app.tui.components.select_list import (
     SelectItem,
     SelectList,
     SelectListLayoutOptions,
-    SelectListTheme as SLTheme,
     SelectListTruncatePrimaryContext,
+)
+from app.tui.components.select_list import (
+    SelectListTheme as SLTheme,
 )
 from app.tui.editor_component import EditorComponent
 from app.tui.tui import TUI
 from app.tui.utils import visible_width
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -352,7 +350,7 @@ class TestPasteMarkerSegmentation:
 class TestShouldSubmitOnBackslashEnter:
     def test_backslash_enter_submits_when_submit_remapped_to_shift_enter(self) -> None:
         """When submit is mapped to shift+enter, backslash+enter should submit."""
-        from app.tui.keybindings import KeybindingsManager, TUI_KEYBINDINGS
+        from app.tui.keybindings import TUI_KEYBINDINGS, KeybindingsManager
 
         # Create custom keybindings where submit is shift+enter
         custom_kb = KeybindingsManager(
@@ -374,7 +372,7 @@ class TestShouldSubmitOnBackslashEnter:
 
     def test_backslash_enter_does_not_submit_with_default_keybindings(self) -> None:
         """With default keybindings (enter=submit), backslash should be kept."""
-        from app.tui.keybindings import KeybindingsManager, TUI_KEYBINDINGS
+        from app.tui.keybindings import TUI_KEYBINDINGS, KeybindingsManager
 
         default_kb = KeybindingsManager(TUI_KEYBINDINGS)
 
@@ -384,7 +382,7 @@ class TestShouldSubmitOnBackslashEnter:
 
     def test_backslash_enter_does_not_submit_when_disabled(self) -> None:
         """When submit is disabled, backslash+enter should not submit."""
-        from app.tui.keybindings import KeybindingsManager, TUI_KEYBINDINGS
+        from app.tui.keybindings import TUI_KEYBINDINGS, KeybindingsManager
 
         custom_kb = KeybindingsManager(
             TUI_KEYBINDINGS,

@@ -1,6 +1,6 @@
 from ai.providers.provider import Provider
-from .copilot.provider import CopilotProvider
 
+from .copilot.provider import CopilotProvider
 
 _provider_classes = {
     "copilot": CopilotProvider,

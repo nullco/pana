@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Callable
 
-from app.tui.keybindings import get_editor_keybindings
 from app.tui.components.loader import Loader
+from app.tui.keybindings import get_editor_keybindings
 
 if TYPE_CHECKING:
     from app.tui.tui import TUI

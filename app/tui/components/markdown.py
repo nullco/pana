@@ -348,7 +348,6 @@ class Markdown:
         """Extract plain text from inline tokens (no styling)."""
         result = ""
         for tok in tokens:
-            ttype = tok.get("type", "")
             children = tok.get("children") or []
             if children:
                 result += self._plain_text(children)

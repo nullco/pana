@@ -15,7 +15,7 @@ from app.tui.undo_stack import UndoStack
 from app.tui.utils import is_punctuation_char, is_whitespace_char, visible_width
 
 if TYPE_CHECKING:
-    from app.tui.autocomplete import AutocompleteProvider, CombinedAutocompleteProvider
+    from app.tui.autocomplete import AutocompleteProvider
     from app.tui.tui import TUI
 
 
@@ -1217,7 +1217,8 @@ class Editor:
         )
         if sugs and sugs["items"]:
             self._autocomplete_prefix = sugs["prefix"]
-            from app.tui.components.select_list import SelectItem, SelectList, SelectListTheme as SLT
+            from app.tui.components.select_list import SelectItem, SelectList
+            from app.tui.components.select_list import SelectListTheme as SLT
 
             items = [
                 SelectItem(value=it.value, label=it.label, description=it.description)
@@ -1249,7 +1250,8 @@ class Editor:
         )
         if sugs and sugs["items"]:
             self._autocomplete_prefix = sugs["prefix"]
-            from app.tui.components.select_list import SelectItem, SelectList, SelectListTheme as SLT
+            from app.tui.components.select_list import SelectItem, SelectList
+            from app.tui.components.select_list import SelectListTheme as SLT
 
             items = [
                 SelectItem(value=it.value, label=it.label, description=it.description)
@@ -1318,7 +1320,8 @@ class Editor:
             return
         # Multiple results: show menu in force mode
         self._autocomplete_prefix = sugs["prefix"]
-        from app.tui.components.select_list import SelectItem, SelectList, SelectListTheme as SLT
+        from app.tui.components.select_list import SelectItem, SelectList
+        from app.tui.components.select_list import SelectListTheme as SLT
         items = [
             SelectItem(value=it.value, label=it.label, description=it.description)
             for it in sugs["items"]

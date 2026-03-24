@@ -30,8 +30,8 @@ from app.tui.components.truncated_text import TruncatedText
 from app.tui.editor_component import EditorComponent
 from app.tui.fuzzy import FuzzyMatch, fuzzy_filter, fuzzy_match
 from app.tui.keybindings import (
-    KeybindingsManager,
     TUI_KEYBINDINGS,
+    KeybindingsManager,
     get_keybindings,
     set_keybindings,
 )
@@ -73,13 +73,13 @@ from app.tui.terminal_image import (
 )
 from app.tui.tui import (
     CURSOR_MARKER,
+    TUI,
     Component,
     Container,
     Focusable,
     OverlayHandle,
     OverlayMargin,
     OverlayOptions,
-    TUI,
     is_focusable,
 )
 from app.tui.utils import truncate_to_width, visible_width, wrap_text_with_ansi

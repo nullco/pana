@@ -5,7 +5,6 @@ import os
 import subprocess
 from dataclasses import dataclass
 from os.path import basename, dirname, expanduser, isdir, join
-from pathlib import Path
 from typing import Callable, Protocol
 
 from app.tui.fuzzy import fuzzy_filter

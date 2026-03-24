@@ -12,12 +12,17 @@ import logging
 import os
 import pathlib
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from app.tui.keys import is_key_release, matches_key
 from app.tui.terminal import Terminal
-from app.tui.terminal_image import get_capabilities, is_image_line, set_cell_dimensions, CellDimensions
+from app.tui.terminal_image import (
+    CellDimensions,
+    get_capabilities,
+    is_image_line,
+    set_cell_dimensions,
+)
 from app.tui.utils import extract_segments, slice_by_column, slice_with_width, visible_width
 
 logger = logging.getLogger(__name__)
