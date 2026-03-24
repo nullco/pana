@@ -36,7 +36,7 @@ from pygments.token import (
 )
 from pygments.util import ClassNotFound as _PygClassNotFound
 
-from agents.agent import Agent
+from agents.agent import Agent, TextEvent, ToolCallEvent, ToolResultEvent
 from ai.providers.factory import get_provider, get_providers
 from app.tui.autocomplete import CombinedAutocompleteProvider, SlashCommand
 from app.tui.components.editor import Editor, EditorOptions, EditorTheme, SelectListTheme
@@ -392,6 +392,27 @@ class MiniApp:
 
         asyncio.ensure_future(self._stream_response(text))
 
+    def _format_tool_args(self, args: dict | str | None) -> str:
+        """Format tool arguments for display."""
+        if args is None:
+            return ""
+        if isinstance(args, str):
+            return args
+        parts = []
+        for k, v in args.items():
+            val = str(v)
+            if len(val) > 120:
+                val = val[:117] + "..."
+            parts.append(f"{_dim(k + '=')}{ val}")
+        return ", ".join(parts)
+
+    def _format_tool_result(self, result: str) -> str:
+        """Format tool result for display, truncating if long."""
+        lines = result.split("\n")
+        if len(lines) > 8:
+            lines = lines[:8] + [_dim(f"... ({len(result.split(chr(10)))} lines total)")]
+        return "\n".join(lines)
+
     async def _stream_response(self, user_text: str) -> None:
         if not self.agent or self._awaiting_response:
             return
@@ -401,28 +422,66 @@ class MiniApp:
         loader = Loader(self.tui, _accent, _dim, "Thinking...")
         self._add_message(loader)
 
-        # Markdown response component
-        md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
-        self._add_message(md)
+        # Markdown response component (may be replaced after tool calls)
+        md: Markdown | None = None
+        loader_removed = False
 
         try:
-            def stream_handler(update: str) -> None:
-                loader.stop()
-                self._chat_container.remove_child(loader)
-                md.set_text(update)
-                self.tui.request_render()
+            def event_handler(event) -> None:
+                nonlocal md, loader_removed
 
-            await self.agent.stream(user_text, stream_handler)
+                if not loader_removed:
+                    loader.stop()
+                    self._chat_container.remove_child(loader)
+                    loader_removed = True
+
+                if isinstance(event, ToolCallEvent):
+                    # End any in-progress text block
+                    md = None
+
+                    # Show tool call header
+                    tool_label = _bold(_accent(f"⚙ {event.tool_name}"))
+                    args_str = self._format_tool_args(event.args)
+                    if args_str:
+                        tool_text = f"{tool_label}\n{args_str}"
+                    else:
+                        tool_text = tool_label
+                    self._add_message(
+                        Text(tool_text, padding_x=1, padding_y=0)
+                    )
+                    self.tui.request_render()
+
+                elif isinstance(event, ToolResultEvent):
+                    # Show tool result (truncated, dimmed)
+                    formatted = self._format_tool_result(event.result)
+                    self._add_message(
+                        Text(_dim(formatted), padding_x=2, padding_y=0)
+                    )
+                    self._add_message(Spacer(1))
+                    self.tui.request_render()
+
+                elif isinstance(event, TextEvent):
+                    if md is None:
+                        md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
+                        self._add_message(md)
+                    md.set_text(event.text)
+                    self.tui.request_render()
+
+            await self.agent.stream(user_text, event_handler)
 
         except Exception as e:
             logger.exception("Error during agent stream")
-            loader.stop()
-            self._chat_container.remove_child(loader)
-            md.set_text(_error(f"❌ {e}"))
+            if not loader_removed:
+                loader.stop()
+                self._chat_container.remove_child(loader)
+            err_md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
+            self._add_message(err_md)
+            err_md.set_text(_error(f"❌ {e}"))
             self.tui.request_render()
         finally:
-            loader.stop()
-            self._chat_container.remove_child(loader)
+            if not loader_removed:
+                loader.stop()
+                self._chat_container.remove_child(loader)
             self._awaiting_response = False
             self._add_message(Spacer(1))
             self.tui.request_render()
