@@ -32,11 +32,11 @@ from agents.agent import Agent
 from ai.providers.factory import get_provider, get_providers
 from state import state
 
-from app.tui.autocomplete import AutocompleteItem, CombinedAutocompleteProvider, SlashCommand
+from app.tui.autocomplete import CombinedAutocompleteProvider, SlashCommand
 from app.tui.components.editor import Editor, EditorOptions, EditorTheme, SelectListTheme
 from app.tui.components.footer import Footer
 from app.tui.components.loader import Loader
-from app.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
+from app.tui.components.markdown import Markdown, MarkdownTheme
 from app.tui.components.select_list import SelectItem, SelectList
 from app.tui.components.select_list import SelectListTheme as SLTheme
 from app.tui.components.spacer import Spacer
@@ -71,16 +71,13 @@ def _bg(r: int, g: int, b: int) -> Callable[[str], str]:
 
 # -- Foreground palette (dark.json resolved) ---------------------------------
 _accent          = _fg(138, 190, 183)   # #8abeb7  sage teal
-_border          = _fg( 95, 135, 255)   # #5f87ff  blue
 _border_muted    = _fg( 80,  80,  80)   # #505050  dark gray  → editor border
 _muted           = _fg(128, 128, 128)   # #808080  medium gray → descriptions, hr, quotes
 _dim             = _fg(102, 102, 102)   # #666666  dim gray   → footer, secondary text
 _success         = _fg(181, 189, 104)   # #b5bd68  olive green → code blocks
 _error           = _fg(204, 102, 102)   # #cc6666  muted red
-_warning         = _fg(255, 255,   0)   # #ffff00  yellow
 _heading         = _fg(240, 198, 116)   # #f0c674  warm gold  → md headings
 _link            = _fg(129, 162, 190)   # #81a2be  steel blue → md links
-_border_accent   = _fg(  0, 215, 255)   # #00d7ff  cyan
 
 # -- Background palette ------------------------------------------------------
 _user_msg_bg_fn  = _bg( 52,  53,  65)   # #343541  user message background
@@ -90,7 +87,6 @@ def _bold(s: str)          -> str: return f"\x1b[1m{s}\x1b[22m"
 def _italic(s: str)        -> str: return f"\x1b[3m{s}\x1b[23m"
 def _underline(s: str)     -> str: return f"\x1b[4m{s}\x1b[24m"
 def _strikethrough(s: str) -> str: return f"\x1b[9m{s}\x1b[29m"
-def _identity(s: str)      -> str: return s
 
 # ---------------------------------------------------------------------------
 # Syntax highlighting — custom Pygments style matching dark.json syntax colors
@@ -137,28 +133,11 @@ _pi_dark_formatter = TerminalTrueColorFormatter(style=_PiDarkStyle)
 
 
 def _highlight_code(code: str, lang: str | None) -> list[str]:
-    """Highlight *code* using the pi-tui dark theme syntax colors.
+    """Syntax-highlight *code* using the pi-tui dark theme colors.
 
     Mirrors highlightCode() in theme.js: skips auto-detection when no language
     is given (unreliable), applies theme's mdCodeBlock color as fallback.
     """
-    if not lang:
-        # No language → apply mdCodeBlock color (success / #b5bd68) to each line
-        return [_success(line) for line in code.split("\n")]
-    try:
-        lexer = get_lexer_by_name(lang, stripall=True)
-    except _PygClassNotFound:
-        return [_success(line) for line in code.split("\n")]
-    highlighted = _pi_dark_formatter.format(
-        __import__("pygments").lex(code, lexer)  # type: ignore[call-arg]
-    )
-    if highlighted.endswith("\n"):
-        highlighted = highlighted[:-1]
-    return highlighted.split("\n")
-
-
-def _highlight_code_proper(code: str, lang: str | None) -> list[str]:
-    """Properly highlight using pygments highlight() API."""
     from pygments import highlight as _pyg_highlight
     if not lang:
         return [_success(line) for line in code.split("\n")]
@@ -215,7 +194,7 @@ _md_theme = MarkdownTheme(
     italic=_italic,
     strikethrough=_strikethrough,
     underline=_underline,
-    highlight_code=_highlight_code_proper,
+    highlight_code=_highlight_code,
 )
 
 # ---------------------------------------------------------------------------
