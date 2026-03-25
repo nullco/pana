@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -60,6 +62,70 @@ class TextEvent:
 StreamEvent = ToolCallEvent | ToolCallUpdateEvent | ToolResultEvent | TextEvent
 
 
+# ---------------------------------------------------------------------------
+# Partial-JSON parser for streaming tool_write args
+# ---------------------------------------------------------------------------
+
+def _try_extract_partial_write_args(args_str: str) -> dict[str, str] | None:
+    """Best-effort extraction of tool_write args from a partial (still-streaming) JSON string.
+
+    The LLM streams args as raw JSON text token by token, so ``args_str`` is
+    typically an incomplete JSON object like::
+
+        {"path": "foo.py", "content": "import os\\nimport sys\\n
+
+    We try to extract whatever is already available so the UI can show the
+    content preview growing in real time.
+    """
+    if not args_str:
+        return None
+
+    # Happy path: JSON is complete — just parse it.
+    try:
+        result = json.loads(args_str)
+        if isinstance(result, dict):
+            return result
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    out: dict[str, str] = {}
+
+    # Extract the completed "path" value.  It's a short string that arrives
+    # well before the (potentially huge) content, so it's safe to match as a
+    # complete JSON string literal.
+    path_m = re.search(r'"path"\s*:\s*("(?:[^"\\]|\\.)*?")', args_str)
+    if path_m:
+        try:
+            out["path"] = json.loads(path_m.group(1))
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Extract the partial "content" value — everything after its opening quote.
+    content_m = re.search(r'"content"\s*:\s*"', args_str)
+    if content_m:
+        raw = args_str[content_m.end():]
+        # Wrap in quotes and try json.loads so we get proper escape decoding
+        # (e.g. \\n → actual newline).  This fails if a JSON escape sequence
+        # is split across the stream boundary (e.g. trailing bare backslash).
+        try:
+            out["content"] = json.loads('"' + raw + '"')
+        except (json.JSONDecodeError, ValueError):
+            # Strip the trailing incomplete escape and try once more.
+            trimmed = raw.rstrip("\\")
+            try:
+                out["content"] = json.loads('"' + trimmed + '"')
+            except (json.JSONDecodeError, ValueError):
+                # Last resort: manual substitution for the most common escapes.
+                out["content"] = (
+                    trimmed.replace("\\n", "\n")
+                    .replace("\\t", "\t")
+                    .replace('\\"', '"')
+                    .replace("\\\\", "\\")
+                )
+
+    return out if out else None
+
+
 class Agent:
 
     def __init__(self, model: Model) -> None:
@@ -116,6 +182,8 @@ class Agent:
         call_started: dict[str, float] = {}
         # tool_call_ids for which we already fired an early ToolCallEvent
         emitted_early_ids: set[str] = set()
+        # per-write-call: how many content lines were in the last update we sent
+        write_content_lines: dict[str, int] = {}
 
         async with self._agent.iter(
             user_input, message_history=self._message_history
@@ -136,24 +204,50 @@ class Agent:
                                         last_text = part.content
                                         event_handler(TextEvent(text=part.content))
                                 elif isinstance(part, ToolCallPart):
-                                    tid = part.tool_call_id
+                                    tid = part.tool_call_id or ""
                                     if part.tool_name and tid not in emitted_early_ids:
+                                        # ── First detection: fire early ToolCallEvent ──
                                         emitted_early_ids.add(tid)
-                                        if tid:
-                                            call_started[tid] = time.monotonic()
-                                        # Args are likely partial JSON at this point —
-                                        # try to parse, fall back to None gracefully.
+                                        if part.tool_call_id:
+                                            call_started[part.tool_call_id] = time.monotonic()
+                                        # Args are likely partial JSON — try to parse,
+                                        # fall back to None gracefully.
                                         try:
                                             early_args: dict | str | None = part.args_as_dict()
                                         except Exception:
                                             early_args = None
                                         event_handler(
                                             ToolCallEvent(
-                                                tool_call_id=tid,
+                                                tool_call_id=part.tool_call_id,
                                                 tool_name=part.tool_name,
                                                 args=early_args,
                                             )
                                         )
+                                    elif (
+                                        tid in emitted_early_ids
+                                        and part.tool_name == "tool_write"
+                                        and isinstance(part.args, str)
+                                    ):
+                                        # ── Subsequent snapshots for tool_write ──
+                                        # Stream the growing content into the existing
+                                        # box by emitting a ToolCallUpdateEvent whenever
+                                        # the content has at least one more line than the
+                                        # last update we sent.
+                                        partial = _try_extract_partial_write_args(part.args)
+                                        if partial and "content" in partial:
+                                            content = partial["content"]
+                                            cur_lines = content.count("\n") + (
+                                                1 if content and not content.endswith("\n") else 0
+                                            )
+                                            if cur_lines > write_content_lines.get(tid, 0):
+                                                write_content_lines[tid] = cur_lines
+                                                event_handler(
+                                                    ToolCallUpdateEvent(
+                                                        tool_call_id=part.tool_call_id,
+                                                        tool_name=part.tool_name,
+                                                        args=partial,
+                                                    )
+                                                )
 
                     # Advance the graph — run() returns the cached _result set
                     # by stream(), so the node is NOT re-executed.
