@@ -569,7 +569,6 @@ class MiniApp:
 
         # Markdown response component (may be replaced after tool calls)
         md: Markdown | None = None
-        loader_removed = False
 
         # Track tool views for bg color transitions
         tool_views: dict[str, _ToolView] = {}
@@ -577,12 +576,11 @@ class MiniApp:
 
         try:
             def event_handler(event) -> None:
-                nonlocal md, loader_removed
+                nonlocal md
 
-                if not loader_removed:
-                    loader.stop()
-                    self._chat_container.remove_child(loader)
-                    loader_removed = True
+                # Keep loader pinned to the bottom: remove it, add new
+                # content, then re-append it so it stays below everything.
+                self._chat_container.remove_child(loader)
 
                 if isinstance(event, ToolCallEvent):
                     md = None
@@ -605,7 +603,6 @@ class MiniApp:
                         tool_views[event.tool_call_id] = tv
                     else:
                         fallback_tool_views.append(tv)
-                    self.tui.request_render()
 
                 elif isinstance(event, ToolResultEvent):
                     # Find the matching tool view
@@ -631,7 +628,6 @@ class MiniApp:
                             tv.box.add_child(
                                 Text(result_text, padding_x=0, padding_y=0)
                             )
-                    self.tui.request_render()
 
                 elif isinstance(event, TextEvent):
                     if md is None:
@@ -640,15 +636,17 @@ class MiniApp:
                         md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
                         self._add_message(md)
                     md.set_text(event.text)
-                    self.tui.request_render()
+
+                # Re-pin the loader below all new content
+                self._add_message(loader)
+                self.tui.request_render()
 
             await self.agent.stream(user_text, event_handler)
 
         except Exception as e:
             logger.exception("Error during agent stream")
-            if not loader_removed:
-                loader.stop()
-                self._chat_container.remove_child(loader)
+            loader.stop()
+            self._chat_container.remove_child(loader)
             # Mark any pending tools as errored
             for tv in list(tool_views.values()) + fallback_tool_views:
                 tv.box.set_bg_fn(_tool_error_bg_fn)
@@ -657,9 +655,8 @@ class MiniApp:
             err_md.set_text(_error(f"❌ {e}"))
             self.tui.request_render()
         finally:
-            if not loader_removed:
-                loader.stop()
-                self._chat_container.remove_child(loader)
+            loader.stop()
+            self._chat_container.remove_child(loader)
             self._awaiting_response = False
             self.tui.request_render()
 
