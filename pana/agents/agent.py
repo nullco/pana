@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from pydantic_ai._agent_graph import CallToolsNode, End, ModelRequestNode
 from pydantic_ai.agent import Agent as PydanticAgent
-from pydantic_ai.messages import ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import TextPart, ToolCallPart, ToolReturnPart
 
 from pana.agents.system_prompt import build_system_prompt
 from pana.agents.tools import tool_bash, tool_edit, tool_read, tool_write
@@ -21,7 +21,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ToolCallEvent:
-    """Fired when the model invokes a tool."""
+    """Fired as soon as the model commits to invoking a tool (args may be partial)."""
+
+    tool_call_id: str | None
+    tool_name: str
+    args: dict | str | None
+
+
+@dataclass
+class ToolCallUpdateEvent:
+    """Fired after a tool's arguments are fully received, to update an earlier ToolCallEvent."""
 
     tool_call_id: str | None
     tool_name: str
@@ -48,7 +57,7 @@ class TextEvent:
 
 
 # A stream handler receives these events
-StreamEvent = ToolCallEvent | ToolResultEvent | TextEvent
+StreamEvent = ToolCallEvent | ToolCallUpdateEvent | ToolResultEvent | TextEvent
 
 
 class Agent:
@@ -94,6 +103,10 @@ class Agent:
 
         Uses the iter() graph API to surface tool calls and results as they
         happen, interleaved with streamed text output.
+
+        Early ToolCallEvents are fired as soon as the model's tool_name token
+        is known (before all args arrive).  A ToolCallUpdateEvent follows once
+        args are fully received so the UI can fill in the final display.
         """
         if self._model.provider.should_reauthenticate():
             await self._model.provider.reauthenticate()
@@ -101,6 +114,8 @@ class Agent:
             self.set_model(model)
 
         call_started: dict[str, float] = {}
+        # tool_call_ids for which we already fired an early ToolCallEvent
+        emitted_early_ids: set[str] = set()
 
         async with self._agent.iter(
             user_input, message_history=self._message_history
@@ -108,27 +123,78 @@ class Agent:
             node = agent_run.next_node
             while not isinstance(node, End):
                 if isinstance(node, ModelRequestNode):
-                    # Stream text output from the model
+                    # Stream responses incrementally so we can detect tool calls
+                    # as soon as the tool_name token arrives — well before the
+                    # full (potentially large) args JSON is received.
+                    last_text = ""
                     async with node.stream(agent_run.ctx) as stream:
-                        async for text in stream.stream_output(debounce_by=0.05):
-                            event_handler(TextEvent(text=text))
-                    # Advance the graph — run() returns the cached _result
-                    # set by stream(), so the node is NOT re-executed.
+                        async for response in stream.stream_responses(debounce_by=0.05):
+                            for part in response.parts:
+                                if isinstance(part, TextPart):
+                                    # Only emit when text has actually grown
+                                    if part.content != last_text:
+                                        last_text = part.content
+                                        event_handler(TextEvent(text=part.content))
+                                elif isinstance(part, ToolCallPart):
+                                    tid = part.tool_call_id
+                                    if part.tool_name and tid not in emitted_early_ids:
+                                        emitted_early_ids.add(tid)
+                                        if tid:
+                                            call_started[tid] = time.monotonic()
+                                        # Args are likely partial JSON at this point —
+                                        # try to parse, fall back to None gracefully.
+                                        try:
+                                            early_args: dict | str | None = part.args_as_dict()
+                                        except Exception:
+                                            early_args = None
+                                        event_handler(
+                                            ToolCallEvent(
+                                                tool_call_id=tid,
+                                                tool_name=part.tool_name,
+                                                args=early_args,
+                                            )
+                                        )
+
+                    # Advance the graph — run() returns the cached _result set
+                    # by stream(), so the node is NOT re-executed.
                     node = await agent_run.next(node)
+
                 elif isinstance(node, CallToolsNode):
-                    # Emit tool call events from the model response
+                    # Emit final tool call info.  For tools already shown via an
+                    # early ToolCallEvent, send a ToolCallUpdateEvent so the UI
+                    # can fill in the complete args (e.g. the write content preview).
                     for part in node.model_response.parts:
                         if isinstance(part, ToolCallPart):
-                            tool_call_id = part.tool_call_id
-                            if tool_call_id:
-                                call_started[tool_call_id] = time.monotonic()
-                            event_handler(
-                                ToolCallEvent(
-                                    tool_call_id=tool_call_id,
-                                    tool_name=part.tool_name,
-                                    args=part.args_as_dict() if hasattr(part, "args_as_dict") else part.args,
+                            tid = part.tool_call_id
+                            try:
+                                full_args: dict | str | None = (
+                                    part.args_as_dict()
+                                    if hasattr(part, "args_as_dict")
+                                    else part.args
                                 )
-                            )
+                            except Exception:
+                                full_args = part.args  # type: ignore[assignment]
+
+                            if tid not in emitted_early_ids:
+                                # Tool call wasn't detected early (no streaming?), emit normally
+                                if tid:
+                                    call_started[tid] = time.monotonic()
+                                event_handler(
+                                    ToolCallEvent(
+                                        tool_call_id=tid,
+                                        tool_name=part.tool_name,
+                                        args=full_args,
+                                    )
+                                )
+                            else:
+                                # Update the existing box with the final args
+                                event_handler(
+                                    ToolCallUpdateEvent(
+                                        tool_call_id=tid,
+                                        tool_name=part.tool_name,
+                                        args=full_args,
+                                    )
+                                )
 
                     # Execute tools (advances the graph)
                     node = await agent_run.next(node)

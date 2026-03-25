@@ -39,8 +39,10 @@ from pygments.token import (
 )
 from pygments.util import ClassNotFound as _PygClassNotFound
 
-from pana.agents.agent import Agent, TextEvent, ToolCallEvent, ToolResultEvent
+from pana import __version__ as _version
+from pana.agents.agent import Agent, TextEvent, ToolCallEvent, ToolCallUpdateEvent, ToolResultEvent
 from pana.ai.providers.factory import get_provider, get_providers
+from pana.state import state
 from pana.tui.autocomplete import CombinedAutocompleteProvider, SlashCommand
 from pana.tui.components.box import Box
 from pana.tui.components.editor import Editor, EditorOptions, EditorTheme, SelectListTheme
@@ -53,8 +55,6 @@ from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 from pana.tui.terminal import ProcessTerminal
 from pana.tui.tui import TUI, Container
-from pana.state import state
-from pana import __version__ as _version
 
 logger = logging.getLogger(__name__)
 
@@ -287,42 +287,69 @@ def _shorten_path(path: str) -> str:
 
 
 def _format_tool_call_text(tool_name: str, args: dict | str | None) -> str:
-    """Format the call header line for a tool invocation."""
-    if isinstance(args, str) or args is None:
-        return _bold(f"{tool_name} {args or ''}")
+    """Format the call header line for a tool invocation.
+
+    ``args`` may be ``None`` when called for an early ToolCallEvent whose
+    arguments haven't finished streaming yet; each tool branch handles that
+    gracefully by displaying ``...`` placeholders.
+    """
+    if isinstance(args, str):
+        return _bold(f"{tool_name} {args}")
+
+    # args is None or a dict from here on — tool branches handle both.
 
     if tool_name == "tool_bash":
-        command = args.get("command", "...")
-        timeout = args.get("timeout")
+        command = args.get("command", "...") if args else "..."
+        timeout = args.get("timeout") if args else None
         text = _bold(f"$ {command}")
         if timeout:
             text += _muted(f" (timeout {timeout}s)")
         return text
 
     if tool_name == "tool_read":
-        raw_path = args.get("path", "...")
-        path_display = _accent(_shorten_path(raw_path)) if raw_path != "..." else _tool_output("...")
-        offset = args.get("offset")
-        limit = args.get("limit")
-        if offset is not None or limit is not None:
-            start = offset or 1
-            end = f"-{start + limit - 1}" if limit else ""
-            path_display += _warning(f":{start}{end}")
+        raw_path = args.get("path", "...") if args else "..."
+        path_display = _accent(_shorten_path(raw_path)) if raw_path != "..." else _muted("...")
+        if args:
+            offset = args.get("offset")
+            limit = args.get("limit")
+            if offset is not None or limit is not None:
+                start = offset or 1
+                end = f"-{start + limit - 1}" if limit else ""
+                path_display += _warning(f":{start}{end}")
         return f"{_bold('read')} {path_display}"
 
     if tool_name == "tool_edit":
-        raw_path = args.get("path", "...")
-        path_display = _accent(_shorten_path(raw_path)) if raw_path != "..." else _tool_output("...")
+        raw_path = args.get("path", "...") if args else "..."
+        path_display = _accent(_shorten_path(raw_path)) if raw_path != "..." else _muted("...")
         return f"{_bold('edit')} {path_display}"
 
     if tool_name == "tool_write":
-        raw_path = args.get("path", "...")
-        path_display = _accent(_shorten_path(raw_path)) if raw_path != "..." else _tool_output("...")
-        return f"{_bold('write')} {path_display}"
+        raw_path = args.get("path", "...") if args else "..."
+        path_display = _accent(_shorten_path(raw_path)) if raw_path != "..." else _muted("...")
+        text = f"{_bold('write')} {path_display}"
+        content = args.get("content", "") if args else ""
+        if content:
+            # Split first so we know the true line count without running
+            # Pygments over the entire file — only highlight what we display.
+            all_lines = content.split("\n")
+            while all_lines and all_lines[-1] == "":
+                all_lines.pop()
+            total_lines = len(all_lines)
+            preview_source = "\n".join(all_lines[:WRITE_PREVIEW_LINES])
+            highlighted = _highlight_for_path(
+                preview_source, raw_path if raw_path != "..." else ""
+            )
+            remaining = total_lines - WRITE_PREVIEW_LINES
+            text += "\n\n" + "\n".join(highlighted)
+            if remaining > 0:
+                text += "\n" + _muted(f"... ({remaining} more lines, {total_lines} total)")
+        return text
 
     # Fallback for unknown tools
+    if not args:
+        return _bold(tool_name)
     parts = []
-    for k, v in (args if isinstance(args, dict) else {}).items():
+    for k, v in args.items():
         val = str(v)
         if len(val) > 120:
             val = val[:117] + "..."
@@ -407,6 +434,7 @@ class _ToolView:
     tool_name: str
     args: dict | str | None
     box: Box
+    call_text_component: Text  # first child — updated by ToolCallUpdateEvent
 
 
 # ---------------------------------------------------------------------------
@@ -588,12 +616,14 @@ class MiniApp:
                     # Create a Box with pending background
                     box = Box(padding_x=1, padding_y=1, bg_fn=_tool_pending_bg_fn)
                     call_text = _format_tool_call_text(event.tool_name, event.args)
-                    box.add_child(Text(call_text, padding_x=0, padding_y=0))
+                    call_text_component = Text(call_text, padding_x=0, padding_y=0)
+                    box.add_child(call_text_component)
 
                     tv = _ToolView(
                         tool_name=event.tool_name,
                         args=event.args,
                         box=box,
+                        call_text_component=call_text_component,
                     )
 
                     self._add_message(Spacer(1))
@@ -603,6 +633,16 @@ class MiniApp:
                         tool_views[event.tool_call_id] = tv
                     else:
                         fallback_tool_views.append(tv)
+
+                elif isinstance(event, ToolCallUpdateEvent):
+                    # The early ToolCallEvent had partial/no args; now we have
+                    # the complete args — update the existing box in place.
+                    tv = tool_views.get(event.tool_call_id) if event.tool_call_id else None
+                    if tv is not None:
+                        tv.args = event.args
+                        tv.call_text_component.set_text(
+                            _format_tool_call_text(event.tool_name, event.args)
+                        )
 
                 elif isinstance(event, ToolResultEvent):
                     # Find the matching tool view
