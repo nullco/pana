@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from pygments.formatters import TerminalTrueColorFormatter
 from pygments.lexers import get_lexer_by_name
@@ -39,6 +41,7 @@ from pygments.util import ClassNotFound as _PygClassNotFound
 from agents.agent import Agent, TextEvent, ToolCallEvent, ToolResultEvent
 from ai.providers.factory import get_provider, get_providers
 from app.tui.autocomplete import CombinedAutocompleteProvider, SlashCommand
+from app.tui.components.box import Box
 from app.tui.components.editor import Editor, EditorOptions, EditorTheme, SelectListTheme
 from app.tui.components.footer import Footer
 from app.tui.components.loader import Loader
@@ -83,11 +86,16 @@ _muted           = _fg(128, 128, 128)   # #808080  medium gray → descriptions,
 _dim             = _fg(102, 102, 102)   # #666666  dim gray   → footer, secondary text
 _success         = _fg(181, 189, 104)   # #b5bd68  olive green → code blocks
 _error           = _fg(204, 102, 102)   # #cc6666  muted red
+_warning         = _fg(255, 255,   0)   # #ffff00  yellow
 _heading         = _fg(240, 198, 116)   # #f0c674  warm gold  → md headings
 _link            = _fg(129, 162, 190)   # #81a2be  steel blue → md links
+_tool_output     = _fg(128, 128, 128)   # #808080  gray → tool result text
 
 # -- Background palette ------------------------------------------------------
-_user_msg_bg_fn  = _bg( 52,  53,  65)   # #343541  user message background
+_user_msg_bg_fn      = _bg( 52,  53,  65)   # #343541  user message background
+_tool_pending_bg_fn  = _bg( 40,  40,  50)   # #282832  tool executing
+_tool_success_bg_fn  = _bg( 40,  50,  40)   # #283228  tool succeeded
+_tool_error_bg_fn    = _bg( 60,  40,  40)   # #3c2828  tool failed
 
 # -- Text attributes — chalk-compatible resets (NOT \x1b[0m full reset) -----
 def _bold(s: str)          -> str: return f"\x1b[1m{s}\x1b[22m"
@@ -247,6 +255,145 @@ class _UserMessage(Text):
 
 
 # ---------------------------------------------------------------------------
+# Tool display helpers — per-tool call/result formatting (mirrors pi-tui)
+# ---------------------------------------------------------------------------
+
+BASH_PREVIEW_LINES = 5
+READ_PREVIEW_LINES = 10
+WRITE_PREVIEW_LINES = 10
+
+
+def _shorten_path(path: str) -> str:
+    """Replace /home/<user>/ prefix with ~/."""
+    home = os.path.expanduser("~")
+    if path.startswith(home + "/"):
+        return "~/" + path[len(home) + 1 :]
+    return path
+
+
+def _format_tool_call_text(tool_name: str, args: dict | str | None) -> str:
+    """Format the call header line for a tool invocation."""
+    if isinstance(args, str) or args is None:
+        return _bold(f"{tool_name} {args or ''}")
+
+    if tool_name == "tool_bash":
+        command = args.get("command", "...")
+        timeout = args.get("timeout")
+        text = _bold(f"$ {command}")
+        if timeout:
+            text += _muted(f" (timeout {timeout}s)")
+        return text
+
+    if tool_name == "tool_read":
+        raw_path = args.get("path", "...")
+        path_display = _accent(_shorten_path(raw_path)) if raw_path != "..." else _tool_output("...")
+        offset = args.get("offset")
+        limit = args.get("limit")
+        if offset is not None or limit is not None:
+            start = offset or 1
+            end = f"-{start + limit - 1}" if limit else ""
+            path_display += _warning(f":{start}{end}")
+        return f"{_bold('read')} {path_display}"
+
+    if tool_name == "tool_edit":
+        raw_path = args.get("path", "...")
+        path_display = _accent(_shorten_path(raw_path)) if raw_path != "..." else _tool_output("...")
+        return f"{_bold('edit')} {path_display}"
+
+    if tool_name == "tool_write":
+        raw_path = args.get("path", "...")
+        path_display = _accent(_shorten_path(raw_path)) if raw_path != "..." else _tool_output("...")
+        return f"{_bold('write')} {path_display}"
+
+    # Fallback for unknown tools
+    parts = []
+    for k, v in (args if isinstance(args, dict) else {}).items():
+        val = str(v)
+        if len(val) > 120:
+            val = val[:117] + "..."
+        parts.append(f"{_dim(k + '=')}{ val}")
+    args_str = ", ".join(parts)
+    text = _bold(tool_name)
+    if args_str:
+        text += f"\n{args_str}"
+    return text
+
+
+def _format_tool_result_text(
+    tool_name: str,
+    args: dict | str | None,
+    result: str,
+    elapsed_s: float | None,
+    is_error: bool,
+) -> str | None:
+    """Format the result portion for a tool. Returns None if nothing to show."""
+    if tool_name == "tool_bash":
+        lines = result.split("\n") if result else []
+        parts: list[str] = []
+        if len(lines) > BASH_PREVIEW_LINES:
+            skipped = len(lines) - BASH_PREVIEW_LINES
+            parts.append(_muted(f"... ({skipped} earlier lines)"))
+            lines = lines[-BASH_PREVIEW_LINES:]
+        for line in lines:
+            parts.append(_tool_output(line))
+        if elapsed_s is not None:
+            parts.append(_muted(f"Took {elapsed_s:.1f}s"))
+        return "\n".join(parts)
+
+    if tool_name == "tool_read":
+        if is_error:
+            return _error(result)
+        lines = result.split("\n") if result else []
+        # Syntax highlight based on file path
+        raw_path = args.get("path", "") if isinstance(args, dict) else ""
+        highlighted = _highlight_for_path(result, raw_path)
+        if len(highlighted) > READ_PREVIEW_LINES:
+            remaining = len(highlighted) - READ_PREVIEW_LINES
+            display = highlighted[:READ_PREVIEW_LINES]
+            display.append(_muted(f"... ({remaining} more lines)"))
+            return "\n" + "\n".join(display)
+        return "\n" + "\n".join(highlighted)
+
+    if tool_name in ("tool_edit", "tool_write"):
+        if is_error:
+            return _error(result)
+        return None  # success → silent
+
+    # Fallback
+    if is_error:
+        return _error(result)
+    lines = result.split("\n") if result else []
+    if len(lines) > 8:
+        lines = lines[:8] + [_muted(f"... ({len(result.split(chr(10)))} lines total)")]
+    return "\n".join(_tool_output(l) for l in lines)
+
+
+def _highlight_for_path(code: str, path: str) -> list[str]:
+    """Syntax-highlight code based on file extension, falling back to toolOutput color."""
+    from pygments import highlight as _pyg_highlight
+    from pygments.lexers import get_lexer_for_filename
+
+    if not path:
+        return [_tool_output(line) for line in code.split("\n")]
+    try:
+        lexer = get_lexer_for_filename(path, stripall=True)
+    except _PygClassNotFound:
+        return [_tool_output(line) for line in code.split("\n")]
+    highlighted = _pyg_highlight(code, lexer, _pi_dark_formatter)
+    if highlighted.endswith("\n"):
+        highlighted = highlighted[:-1]
+    return highlighted.split("\n")
+
+
+@dataclass
+class _ToolView:
+    """Tracks a single tool invocation's UI state."""
+    tool_name: str
+    args: dict | str | None
+    box: Box
+
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 
@@ -392,39 +539,22 @@ class MiniApp:
 
         asyncio.ensure_future(self._stream_response(text))
 
-    def _format_tool_args(self, args: dict | str | None) -> str:
-        """Format tool arguments for display."""
-        if args is None:
-            return ""
-        if isinstance(args, str):
-            return args
-        parts = []
-        for k, v in args.items():
-            val = str(v)
-            if len(val) > 120:
-                val = val[:117] + "..."
-            parts.append(f"{_dim(k + '=')}{ val}")
-        return ", ".join(parts)
-
-    def _format_tool_result(self, result: str) -> str:
-        """Format tool result for display, truncating if long."""
-        lines = result.split("\n")
-        if len(lines) > 8:
-            lines = lines[:8] + [_dim(f"... ({len(result.split(chr(10)))} lines total)")]
-        return "\n".join(lines)
-
     async def _stream_response(self, user_text: str) -> None:
         if not self.agent or self._awaiting_response:
             return
         self._awaiting_response = True
 
         # Loader: accent spinner, dim message (mirrors BorderedLoader colors)
-        loader = Loader(self.tui, _accent, _dim, "Thinking...")
+        loader = Loader(self.tui, _accent, _dim, "Working...")
         self._add_message(loader)
 
         # Markdown response component (may be replaced after tool calls)
         md: Markdown | None = None
         loader_removed = False
+
+        # Track tool views for bg color transitions
+        tool_views: dict[str, _ToolView] = {}
+        fallback_tool_views: list[_ToolView] = []
 
         try:
             def event_handler(event) -> None:
@@ -436,28 +566,52 @@ class MiniApp:
                     loader_removed = True
 
                 if isinstance(event, ToolCallEvent):
-                    # End any in-progress text block
                     md = None
 
-                    # Show tool call header
-                    tool_label = _bold(_accent(f"⚙ {event.tool_name}"))
-                    args_str = self._format_tool_args(event.args)
-                    if args_str:
-                        tool_text = f"{tool_label}\n{args_str}"
-                    else:
-                        tool_text = tool_label
-                    self._add_message(
-                        Text(tool_text, padding_x=1, padding_y=0)
+                    # Create a Box with pending background
+                    box = Box(padding_x=1, padding_y=1, bg_fn=_tool_pending_bg_fn)
+                    call_text = _format_tool_call_text(event.tool_name, event.args)
+                    box.add_child(Text(call_text, padding_x=0, padding_y=0))
+
+                    tv = _ToolView(
+                        tool_name=event.tool_name,
+                        args=event.args,
+                        box=box,
                     )
+
+                    self._add_message(Spacer(1))
+                    self._add_message(box)
+
+                    if event.tool_call_id:
+                        tool_views[event.tool_call_id] = tv
+                    else:
+                        fallback_tool_views.append(tv)
                     self.tui.request_render()
 
                 elif isinstance(event, ToolResultEvent):
-                    # Show tool result (truncated, dimmed)
-                    formatted = self._format_tool_result(event.result)
-                    self._add_message(
-                        Text(_dim(formatted), padding_x=2, padding_y=0)
-                    )
-                    self._add_message(Spacer(1))
+                    # Find the matching tool view
+                    tv = None
+                    if event.tool_call_id:
+                        tv = tool_views.get(event.tool_call_id)
+                    if tv is None and fallback_tool_views:
+                        tv = fallback_tool_views.pop(0)
+
+                    if tv is not None:
+                        # Transition bg color
+                        if event.is_error:
+                            tv.box.set_bg_fn(_tool_error_bg_fn)
+                        else:
+                            tv.box.set_bg_fn(_tool_success_bg_fn)
+
+                        # Add result content if applicable
+                        result_text = _format_tool_result_text(
+                            tv.tool_name, tv.args,
+                            event.result, event.elapsed_s, event.is_error,
+                        )
+                        if result_text is not None:
+                            tv.box.add_child(
+                                Text(result_text, padding_x=0, padding_y=0)
+                            )
                     self.tui.request_render()
 
                 elif isinstance(event, TextEvent):
@@ -474,6 +628,9 @@ class MiniApp:
             if not loader_removed:
                 loader.stop()
                 self._chat_container.remove_child(loader)
+            # Mark any pending tools as errored
+            for tv in list(tool_views.values()) + fallback_tool_views:
+                tv.box.set_bg_fn(_tool_error_bg_fn)
             err_md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
             self._add_message(err_md)
             err_md.set_text(_error(f"❌ {e}"))

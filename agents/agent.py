@@ -1,6 +1,7 @@
 import logging
+import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pydantic_ai._agent_graph import CallToolsNode, End, ModelRequestNode
 from pydantic_ai.agent import Agent as PydanticAgent
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 class ToolCallEvent:
     """Fired when the model invokes a tool."""
 
+    tool_call_id: str | None
     tool_name: str
     args: dict | str | None
 
@@ -31,8 +33,11 @@ class ToolCallEvent:
 class ToolResultEvent:
     """Fired when a tool returns its result."""
 
+    tool_call_id: str | None
     tool_name: str
     result: str
+    elapsed_s: float | None = None
+    is_error: bool = False
 
 
 @dataclass
@@ -96,6 +101,8 @@ class Agent:
             model = await self._model.provider.build_model(self._model.name)
             self.set_model(model)
 
+        call_started: dict[str, float] = {}
+
         async with self._agent.iter(
             user_input, message_history=self._message_history
         ) as agent_run:
@@ -113,8 +120,12 @@ class Agent:
                     # Emit tool call events from the model response
                     for part in node.model_response.parts:
                         if isinstance(part, ToolCallPart):
+                            tool_call_id = part.tool_call_id
+                            if tool_call_id:
+                                call_started[tool_call_id] = time.monotonic()
                             event_handler(
                                 ToolCallEvent(
+                                    tool_call_id=tool_call_id,
                                     tool_name=part.tool_name,
                                     args=part.args_as_dict() if hasattr(part, "args_as_dict") else part.args,
                                 )
@@ -123,12 +134,6 @@ class Agent:
                     # Execute tools (advances the graph)
                     node = await agent_run.next(node)
 
-                    # Emit tool result events from the messages
-                    if hasattr(node, "user_prompt") and node.user_prompt:
-                        # After tool execution, the next node's user_prompt
-                        # may not have results. Check tool_call_results instead.
-                        pass
-
                     # Get results from the last request message
                     messages = agent_run.all_messages()
                     for msg in reversed(messages):
@@ -136,14 +141,22 @@ class Agent:
                             for part in msg.parts:
                                 if isinstance(part, ToolReturnPart):
                                     content = part.content
-                                    if isinstance(content, str):
-                                        result_text = content
-                                    else:
-                                        result_text = str(content)
+                                    result_text = content if isinstance(content, str) else str(content)
+
+                                    elapsed_s = None
+                                    tcid = part.tool_call_id
+                                    if tcid and tcid in call_started:
+                                        elapsed_s = time.monotonic() - call_started.pop(tcid)
+
+                                    is_error = result_text.lstrip().startswith("Error")
+
                                     event_handler(
                                         ToolResultEvent(
+                                            tool_call_id=tcid,
                                             tool_name=part.tool_name,
                                             result=result_text,
+                                            elapsed_s=elapsed_s,
+                                            is_error=is_error,
                                         )
                                     )
                             break
