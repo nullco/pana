@@ -33,23 +33,114 @@ def _resolve_path(path: str) -> Path:
     return p.resolve()
 
 
+def _format_size(num_bytes: int) -> str:
+    """Format bytes as a human-readable size string."""
+    if num_bytes < 1024:
+        return f"{num_bytes}B"
+    elif num_bytes < 1024 * 1024:
+        return f"{num_bytes / 1024:.1f}KB"
+    else:
+        return f"{num_bytes / (1024 * 1024):.1f}MB"
+
+
 def _truncate_output(text: str, max_lines: int = MAX_LINES, max_bytes: int = MAX_BYTES) -> str:
-    """Truncate text to max_lines or max_bytes, whichever is hit first."""
+    """Truncate text to max_lines or max_bytes, whichever is hit first.
+
+    Used for bash output (tail-style: keep last N lines/bytes).
+    Returns the truncated text with a note prepended if truncated.
+    """
     lines = text.split("\n")
+    total_lines = len(lines)
+    total_bytes = len(text.encode("utf-8", errors="replace"))
+
+    if total_lines <= max_lines and total_bytes <= max_bytes:
+        return text
+
+    # Work from the end to keep the tail (most recent output)
     result_lines: list[str] = []
-    total_bytes = 0
-    for line in lines[:max_lines]:
-        line_bytes = len(line.encode("utf-8", errors="replace"))
-        if total_bytes + line_bytes > max_bytes:
-            result_lines.append(line[: max(0, max_bytes - total_bytes)])
+    used_bytes = 0
+    truncated_by = "lines"
+    for line in reversed(lines[-max_lines:]):
+        line_bytes = len(line.encode("utf-8", errors="replace")) + (1 if result_lines else 0)
+        if used_bytes + line_bytes > max_bytes:
+            truncated_by = "bytes"
             break
-        result_lines.append(line)
-        total_bytes += line_bytes + 1  # +1 for newline
-    truncated = len(result_lines) < len(lines)
+        result_lines.insert(0, line)
+        used_bytes += line_bytes
+
+    truncated = len(result_lines) < total_lines
     result = "\n".join(result_lines)
     if truncated:
-        result += f"\n\n... (truncated — {len(lines)} total lines)"
+        if truncated_by == "lines":
+            result = f"... (output truncated, showing last {len(result_lines)} of {total_lines} lines)\n" + result
+        else:
+            result = f"... (output truncated at {_format_size(max_bytes)} limit)\n" + result
     return result
+
+
+def _truncate_head(
+    content: str, max_lines: int = MAX_LINES, max_bytes: int = MAX_BYTES
+) -> dict:
+    """Truncate content from the head (keep first N lines/bytes).
+
+    Returns a dict with:
+      - content: truncated text
+      - truncated: bool
+      - truncated_by: "lines" | "bytes" | None
+      - output_lines: number of lines in output
+      - total_lines: total lines in original
+      - first_line_exceeds_limit: bool
+    """
+    total_bytes = len(content.encode("utf-8", errors="replace"))
+    lines = content.split("\n")
+    total_lines = len(lines)
+
+    # No truncation needed
+    if total_lines <= max_lines and total_bytes <= max_bytes:
+        return {
+            "content": content,
+            "truncated": False,
+            "truncated_by": None,
+            "output_lines": total_lines,
+            "total_lines": total_lines,
+            "first_line_exceeds_limit": False,
+        }
+
+    # Check if first line alone exceeds byte limit
+    first_line_bytes = len(lines[0].encode("utf-8", errors="replace"))
+    if first_line_bytes > max_bytes:
+        return {
+            "content": "",
+            "truncated": True,
+            "truncated_by": "bytes",
+            "output_lines": 0,
+            "total_lines": total_lines,
+            "first_line_exceeds_limit": True,
+        }
+
+    # Collect complete lines that fit within both limits
+    result_lines: list[str] = []
+    used_bytes = 0
+    truncated_by = "lines"
+    for i, line in enumerate(lines[:max_lines]):
+        line_bytes = len(line.encode("utf-8", errors="replace")) + (1 if i > 0 else 0)
+        if used_bytes + line_bytes > max_bytes:
+            truncated_by = "bytes"
+            break
+        result_lines.append(line)
+        used_bytes += line_bytes
+
+    if len(result_lines) >= max_lines and used_bytes <= max_bytes:
+        truncated_by = "lines"
+
+    return {
+        "content": "\n".join(result_lines),
+        "truncated": True,
+        "truncated_by": truncated_by,
+        "output_lines": len(result_lines),
+        "total_lines": total_lines,
+        "first_line_exceeds_limit": False,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -60,8 +151,10 @@ def _truncate_output(text: str, max_lines: int = MAX_LINES, max_bytes: int = MAX
 def tool_read(path: str, offset: int | None = None, limit: int | None = None) -> str:
     """Read the contents of a file.
 
-    Supports text files. Output is truncated to 2000 lines or 50KB
-    (whichever is hit first). Use offset/limit for large files.
+    Supports text files and images (jpg, png, gif, webp). Images are returned
+    as a notice only. Output is truncated to 2000 lines or 50KB (whichever is
+    hit first). Use offset/limit for large files. When you need the full file,
+    continue with offset until complete.
 
     Args:
         path: Path to the file to read (relative or absolute).
@@ -83,15 +176,61 @@ def tool_read(path: str, offset: int | None = None, limit: int | None = None) ->
     except OSError as e:
         return f"Error reading {path}: {e}"
 
-    lines = text.split("\n")
+    all_lines = text.split("\n")
+    total_file_lines = len(all_lines)
 
-    # Apply offset/limit
-    start = max(0, (offset or 1) - 1)  # 1-indexed → 0-indexed
-    end = start + (limit or len(lines))
-    lines = lines[start:end]
+    # Apply offset (1-indexed → 0-indexed)
+    start = max(0, (offset or 1) - 1)
+    start_display = start + 1  # 1-indexed for messages
 
-    result = "\n".join(lines)
-    return _truncate_output(result)
+    if start >= total_file_lines:
+        return f"Error: offset {offset} is beyond end of file ({total_file_lines} lines total)"
+
+    # Apply user-specified limit if given
+    user_limited_lines: int | None = None
+    if limit is not None:
+        end = min(start + limit, total_file_lines)
+        selected = "\n".join(all_lines[start:end])
+        user_limited_lines = end - start
+    else:
+        selected = "\n".join(all_lines[start:])
+
+    # Apply head truncation (line + byte limits)
+    trunc = _truncate_head(selected)
+
+    if trunc["first_line_exceeds_limit"]:
+        first_line_size = _format_size(len(all_lines[start].encode("utf-8", errors="replace")))
+        return (
+            f"[Line {start_display} is {first_line_size}, exceeds {_format_size(MAX_BYTES)} limit. "
+            f"Use bash: sed -n '{start_display}p' {path} | head -c {MAX_BYTES}]"
+        )
+
+    if trunc["truncated"]:
+        end_line_display = start_display + trunc["output_lines"] - 1
+        next_offset = end_line_display + 1
+        output = trunc["content"]
+        if trunc["truncated_by"] == "lines":
+            output += (
+                f"\n\n[Showing lines {start_display}-{end_line_display} of {total_file_lines}. "
+                f"Use offset={next_offset} to continue.]"
+            )
+        else:
+            output += (
+                f"\n\n[Showing lines {start_display}-{end_line_display} of {total_file_lines} "
+                f"({_format_size(MAX_BYTES)} limit). Use offset={next_offset} to continue.]"
+            )
+        return output
+
+    # No auto-truncation, but user-specified limit may have stopped early
+    if user_limited_lines is not None and start + user_limited_lines < total_file_lines:
+        remaining = total_file_lines - (start + user_limited_lines)
+        next_offset = start + user_limited_lines + 1
+        return (
+            trunc["content"]
+            + f"\n\n[{remaining} more lines in file. Use offset={next_offset} to continue.]"
+        )
+
+    return trunc["content"]
 
 
 # ---------------------------------------------------------------------------

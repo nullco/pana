@@ -65,11 +65,13 @@ class TestRead:
 
     def test_read_with_limit(self, tmp_dir):
         f = tmp_dir / "lines.txt"
-        f.write_text("a\nb\nc\nd\ne\n")
+        f.write_text("alpha\nbeta\ngamma\ndelta\nepsilon\n")
         result = tool_read("lines.txt", limit=2)
-        assert "a" in result
-        assert "b" in result
-        assert "c" not in result
+        assert "alpha" in result
+        assert "beta" in result
+        assert "gamma" not in result
+        # Continuation hint should tell the model how to proceed
+        assert "offset=3" in result
 
     def test_read_with_offset_and_limit(self, tmp_dir):
         f = tmp_dir / "lines.txt"
@@ -92,7 +94,9 @@ class TestRead:
         # Write more than 2000 lines
         f.write_text("\n".join(f"line{i}" for i in range(3000)))
         result = tool_read("big.txt")
-        assert "truncated" in result
+        # Pi-style: actionable continuation hint instead of generic "truncated"
+        assert "offset=" in result
+        assert "to continue" in result
 
 
 # ---------------------------------------------------------------------------
