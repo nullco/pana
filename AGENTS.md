@@ -121,3 +121,7 @@ Configure in `.env` (loaded automatically via `python-dotenv`).
 uv run ruff check .
 uv run pytest
 ```
+
+## Publishing
+
+See [PUBLISHING.md](PUBLISHING.md) for how to release to PyPI.
