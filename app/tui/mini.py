@@ -336,14 +336,15 @@ def _format_tool_result_text(
             lines = lines[-BASH_PREVIEW_LINES:]
         for line in lines:
             parts.append(_tool_output(line))
+        output_block = "\n".join(parts)
+        sections = ["\n" + output_block]
         if elapsed_s is not None:
-            parts.append(_muted(f"Took {elapsed_s:.1f}s"))
-        return "\n".join(parts)
+            sections.append("\n\n" + _muted(f"Took {elapsed_s:.1f}s"))
+        return "".join(sections)
 
     if tool_name == "tool_read":
         if is_error:
-            return _error(result)
-        lines = result.split("\n") if result else []
+            return "\n" + _error(result)
         # Syntax highlight based on file path
         raw_path = args.get("path", "") if isinstance(args, dict) else ""
         highlighted = _highlight_for_path(result, raw_path)
@@ -356,16 +357,16 @@ def _format_tool_result_text(
 
     if tool_name in ("tool_edit", "tool_write"):
         if is_error:
-            return _error(result)
+            return "\n" + _error(result)
         return None  # success → silent
 
     # Fallback
     if is_error:
-        return _error(result)
+        return "\n" + _error(result)
     lines = result.split("\n") if result else []
     if len(lines) > 8:
         lines = lines[:8] + [_muted(f"... ({len(result.split(chr(10)))} lines total)")]
-    return "\n".join(_tool_output(l) for l in lines)
+    return "\n" + "\n".join(_tool_output(l) for l in lines)
 
 
 def _highlight_for_path(code: str, path: str) -> list[str]:
@@ -533,9 +534,9 @@ class MiniApp:
             self._add_message(Spacer(1))
             return
 
-        # User message bubble: userMessageBg background + OSC 133 zones
-        self._add_message(_UserMessage(text, padding_x=1, padding_y=1, custom_bg_fn=_user_msg_bg_fn))
+        # User message bubble: Spacer(1) + bg-padded text (mirrors UserMessageComponent)
         self._add_message(Spacer(1))
+        self._add_message(_UserMessage(text, padding_x=1, padding_y=1, custom_bg_fn=_user_msg_bg_fn))
 
         asyncio.ensure_future(self._stream_response(text))
 
@@ -616,6 +617,8 @@ class MiniApp:
 
                 elif isinstance(event, TextEvent):
                     if md is None:
+                        # Spacer(1) + Markdown (mirrors AssistantMessageComponent)
+                        self._add_message(Spacer(1))
                         md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
                         self._add_message(md)
                     md.set_text(event.text)
@@ -640,7 +643,6 @@ class MiniApp:
                 loader.stop()
                 self._chat_container.remove_child(loader)
             self._awaiting_response = False
-            self._add_message(Spacer(1))
             self.tui.request_render()
 
     async def _cmd_login(self) -> None:
