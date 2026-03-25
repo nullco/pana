@@ -1,14 +1,14 @@
-# Agent 007 — Coding Agent Guidelines
+# Pana — Coding Agent Guidelines
 
 ## Overview
 
-Agent 007 is a minimalist AI coding agent with a custom terminal UI (TUI). It uses GitHub Copilot as its LLM provider, streams responses with Markdown rendering, and persists session state to `~/.007/state.json`.
+Pana is a minimalist AI coding agent with a custom terminal UI (TUI). It uses GitHub Copilot as its LLM provider, streams responses with Markdown rendering, and persists session state to `~/.pana/state.json`.
 
 ## Running
 
 ```bash
 # Run the app
-uv run python -m agent007
+uv run python -m pana
 
 # Or directly
 uv run python main.py
@@ -20,10 +20,10 @@ uv run pytest
 ## Project Structure
 
 ```
-agent007/
+pana/
 ├── main.py                        # Alt entry point (loads .env, runs TUI)
-├── agent007/__main__.py           # Package entry point (python -m agent007)
-├── state.py                       # Persistent JSON state (~/.007/state.json)
+├── pana/__main__.py               # Package entry point (python -m pana)
+├── state.py                       # Persistent JSON state (~/.pana/state.json)
 ├── agents/
 │   └── agent.py                   # Agent wrapper around pydantic-ai (streaming, history)
 ├── ai/providers/
@@ -69,7 +69,7 @@ agent007/
 - **pydantic-ai** is used as the LLM abstraction layer. The `Agent` class wraps `pydantic_ai.agent.Agent` for streaming and message history management.
 - **GitHub Copilot** is the only provider. Auth uses OAuth device flow; tokens are persisted in state. The provider auto-reauthenticates when tokens are within 5 minutes of expiry.
 - **Custom TUI** — no Textual/Rich dependency at runtime. The TUI renders directly with ANSI escape codes and truecolor. Colors follow a dark theme inspired by pi-tui (`dark.json` palette).
-- **State** is a simple JSON file at `~/.007/state.json` storing provider credentials and selected model.
+- **State** is a simple JSON file at `~/.pana/state.json` storing provider credentials and selected model.
 
 ## TUI Commands
 

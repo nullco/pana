@@ -460,7 +460,7 @@ class MiniApp:
 
         # Header: accent-colored title (mirrors pi-tui header style)
         self._chat_container.add_child(
-            Text(_bold(_accent("Agent 007")) + " — mini mode", padding_x=0, padding_y=0)
+            Text(_bold(_accent("Pana")) + " — mini mode", padding_x=0, padding_y=0)
         )
         self._chat_container.add_child(Spacer(1))
 

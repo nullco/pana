@@ -6,7 +6,7 @@ class State:
 
     def __init__(self):
         home = Path.home()
-        self._path = Path(home, ".007/state.json")
+        self._path = Path(home, ".pana/state.json")
         self._entries = self._load()
 
     def _load(self):

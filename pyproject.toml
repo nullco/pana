@@ -1,5 +1,5 @@
 [project]
-name = "agent"
+name = "pana"
 version = "0.1.0"
 description = "A coding agent with a minimalist TUI."
 readme = "README.md"
