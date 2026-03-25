@@ -54,6 +54,7 @@ from pana.tui.components.text import Text
 from pana.tui.terminal import ProcessTerminal
 from pana.tui.tui import TUI, Container
 from pana.state import state
+from pana import __version__ as _version
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +234,7 @@ _md_theme = MarkdownTheme(
 COMMANDS: dict[str, str] = {
     "login": "Authenticate with a provider",
     "model": "Select a model",
-    "clear": "Clear chat history",
+    "new": "Start a new session",
     "help": "Show available commands",
     "quit": "Exit",
 }
@@ -460,7 +461,7 @@ class MiniApp:
 
         # Header: accent-colored title (mirrors pi-tui header style)
         self._chat_container.add_child(
-            Text(_bold(_accent("Pana")) + " — mini mode", padding_x=0, padding_y=0)
+            Text(_bold(_accent("pana")) + " " + _muted(f"v{_version}"), padding_x=0, padding_y=0)
         )
         self._chat_container.add_child(Spacer(1))
 
@@ -513,11 +514,11 @@ class MiniApp:
             if cmd in _QUIT_ALIASES:
                 self.tui.stop()
                 return
-            elif cmd == "clear":
+            elif cmd == "new":
                 if self.agent:
                     self.agent.clear_history()
                 self._chat_container.children[:] = self._chat_container.children[:2]
-                self._add_message(Text(_dim("History cleared."), padding_x=1, padding_y=0))
+                self._add_message(Text(_dim("✓ New session started"), padding_x=1, padding_y=0))
                 self.tui.request_render()
                 return
             elif cmd == "login":
