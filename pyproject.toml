@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pana"
-version = "0.1.0"
-description = "A minimalist AI coding agent with a custom terminal UI."
+version = "0.1.1"
+description = "A minimalist AI coding agent"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [
-    { name = "Juan", email = "juan@example.com" },
+    { name = "Juan Sebastian Quintero"},
 ]
 keywords = ["ai", "coding-agent", "tui", "copilot", "llm"]
 classifiers = [
