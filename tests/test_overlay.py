@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Callable
 
-from app.tui.tui import TUI, OverlayMargin, OverlayOptions
+from pana.tui.tui import TUI, OverlayMargin, OverlayOptions
 
 # ---------------------------------------------------------------------------
 # ANSI helpers

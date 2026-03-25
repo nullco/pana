@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from agents.context import collect_agents_md, find_project_root
+from pana.agents.context import collect_agents_md, find_project_root
 
 
 def test_find_project_root_with_git(tmp_path):

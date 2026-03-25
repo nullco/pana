@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from app.tui.components.select_list import (
+from pana.tui.components.select_list import (
     SelectItem,
     SelectList,
     SelectListLayoutOptions,
     SelectListTheme,
 )
-from app.tui.utils import visible_width
+from pana.tui.utils import visible_width
 
 # ---------------------------------------------------------------------------
 # Helpers

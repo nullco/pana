@@ -1,5 +1,0 @@
-# Temporary requirements file for lock/export, not for manual editing
-textual
-pydantic-ai
-ruff
-black

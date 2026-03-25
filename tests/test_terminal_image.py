@@ -9,7 +9,7 @@ import base64
 import struct
 from typing import Callable
 
-from app.tui.terminal_image import (
+from pana.tui.terminal_image import (
     CellDimensions,
     ImageDimensions,
     allocate_image_id,
@@ -25,7 +25,7 @@ from app.tui.terminal_image import (
     image_fallback,
     is_image_line,
 )
-from app.tui.tui import TUI, OverlayOptions
+from pana.tui.tui import TUI, OverlayOptions
 
 # ---------------------------------------------------------------------------
 # Stub terminal

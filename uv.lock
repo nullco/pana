@@ -1791,7 +1791,7 @@ wheels = [
 [[package]]
 name = "pana"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "grapheme" },
     { name = "mistune" },
@@ -1809,11 +1809,6 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "requests-mock" },
     { name = "ruff" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
     { name = "vulture" },
 ]
 
@@ -1831,14 +1826,9 @@ requires-dist = [
     { name = "requests" },
     { name = "requests-mock", marker = "extra == 'dev'" },
     { name = "ruff", marker = "extra == 'dev'" },
+    { name = "vulture", marker = "extra == 'dev'", specifier = ">=2.15" },
 ]
 provides-extras = ["dev"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "vulture", specifier = ">=2.15" },
-]
 
 [[package]]
 name = "pathable"

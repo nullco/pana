@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from agents.tools import tool_bash, tool_edit, tool_read, tool_write
+from pana.agents.tools import tool_bash, tool_edit, tool_read, tool_write
 
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ for emoji, regional-indicator, ZWJ-sequence, and CJK edge cases.
 """
 from __future__ import annotations
 
-from app.tui.utils import _grapheme_width, visible_width
+from pana.tui.utils import _grapheme_width, visible_width
 
 # -- Regional indicator pairs (flags) --------------------------------------
 

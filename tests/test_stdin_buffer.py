@@ -7,7 +7,7 @@ and that extract_complete_sequences correctly splits raw input.
 
 from __future__ import annotations
 
-from app.tui.stdin_buffer import StdinBuffer, extract_complete_sequences
+from pana.tui.stdin_buffer import StdinBuffer, extract_complete_sequences
 
 # ---------------------------------------------------------------------------
 # Helpers

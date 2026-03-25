@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from app.tui.tui import TUI
+from pana.tui.tui import TUI
 
 # ---------------------------------------------------------------------------
 # Minimal stub terminal

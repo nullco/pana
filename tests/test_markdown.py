@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import re
 
-from app.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
-from app.tui.utils import visible_width
+from pana.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
+from pana.tui.utils import visible_width
 
 # ---------------------------------------------------------------------------
 # Helpers

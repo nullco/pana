@@ -13,12 +13,12 @@ Covers:
 """
 from __future__ import annotations
 
-from app.tui.autocomplete import (
+from pana.tui.autocomplete import (
     AutocompleteItem,
     CombinedAutocompleteProvider,
     SlashCommand,
 )
-from app.tui.components.editor import (
+from pana.tui.components.editor import (
     Editor,
     EditorOptions,
     EditorTheme,
@@ -27,18 +27,18 @@ from app.tui.components.editor import (
     _segment_with_markers,
     word_wrap_line,
 )
-from app.tui.components.select_list import (
+from pana.tui.components.select_list import (
     SelectItem,
     SelectList,
     SelectListLayoutOptions,
     SelectListTruncatePrimaryContext,
 )
-from app.tui.components.select_list import (
+from pana.tui.components.select_list import (
     SelectListTheme as SLTheme,
 )
-from app.tui.editor_component import EditorComponent
-from app.tui.tui import TUI
-from app.tui.utils import visible_width
+from pana.tui.editor_component import EditorComponent
+from pana.tui.tui import TUI
+from pana.tui.utils import visible_width
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -350,7 +350,7 @@ class TestPasteMarkerSegmentation:
 class TestShouldSubmitOnBackslashEnter:
     def test_backslash_enter_submits_when_submit_remapped_to_shift_enter(self) -> None:
         """When submit is mapped to shift+enter, backslash+enter should submit."""
-        from app.tui.keybindings import TUI_KEYBINDINGS, KeybindingsManager
+        from pana.tui.keybindings import TUI_KEYBINDINGS, KeybindingsManager
 
         # Create custom keybindings where submit is shift+enter
         custom_kb = KeybindingsManager(
@@ -372,7 +372,7 @@ class TestShouldSubmitOnBackslashEnter:
 
     def test_backslash_enter_does_not_submit_with_default_keybindings(self) -> None:
         """With default keybindings (enter=submit), backslash should be kept."""
-        from app.tui.keybindings import TUI_KEYBINDINGS, KeybindingsManager
+        from pana.tui.keybindings import TUI_KEYBINDINGS, KeybindingsManager
 
         default_kb = KeybindingsManager(TUI_KEYBINDINGS)
 
@@ -382,7 +382,7 @@ class TestShouldSubmitOnBackslashEnter:
 
     def test_backslash_enter_does_not_submit_when_disabled(self) -> None:
         """When submit is disabled, backslash+enter should not submit."""
-        from app.tui.keybindings import TUI_KEYBINDINGS, KeybindingsManager
+        from pana.tui.keybindings import TUI_KEYBINDINGS, KeybindingsManager
 
         custom_kb = KeybindingsManager(
             TUI_KEYBINDINGS,
@@ -662,7 +662,7 @@ class TestAutocompleteScopedFuzzyQuery:
 
 class TestInitExports:
     def test_tui_package_exports_core_types(self) -> None:
-        import app.tui as tui
+        import pana.tui as tui
 
         # Core
         assert hasattr(tui, "TUI")
@@ -673,7 +673,7 @@ class TestInitExports:
         assert hasattr(tui, "is_focusable")
 
     def test_tui_package_exports_components(self) -> None:
-        import app.tui as tui
+        import pana.tui as tui
 
         assert hasattr(tui, "Box")
         assert hasattr(tui, "Editor")
@@ -689,7 +689,7 @@ class TestInitExports:
         assert hasattr(tui, "Image")
 
     def test_tui_package_exports_keys(self) -> None:
-        import app.tui as tui
+        import pana.tui as tui
 
         assert hasattr(tui, "Key")
         assert hasattr(tui, "matches_key")
@@ -698,51 +698,51 @@ class TestInitExports:
         assert hasattr(tui, "is_key_repeat")
 
     def test_tui_package_exports_editor_component(self) -> None:
-        import app.tui as tui
+        import pana.tui as tui
 
         assert hasattr(tui, "EditorComponent")
 
     def test_tui_package_exports_truncate_primary_context(self) -> None:
-        import app.tui as tui
+        import pana.tui as tui
 
         assert hasattr(tui, "SelectListTruncatePrimaryContext")
 
     def test_tui_package_exports_autocomplete(self) -> None:
-        import app.tui as tui
+        import pana.tui as tui
 
         assert hasattr(tui, "AutocompleteItem")
         assert hasattr(tui, "CombinedAutocompleteProvider")
         assert hasattr(tui, "SlashCommand")
 
     def test_tui_package_exports_utils(self) -> None:
-        import app.tui as tui
+        import pana.tui as tui
 
         assert hasattr(tui, "visible_width")
         assert hasattr(tui, "truncate_to_width")
         assert hasattr(tui, "wrap_text_with_ansi")
 
     def test_tui_package_exports_terminal(self) -> None:
-        import app.tui as tui
+        import pana.tui as tui
 
         assert hasattr(tui, "ProcessTerminal")
         assert hasattr(tui, "Terminal")
         assert hasattr(tui, "StdinBuffer")
 
     def test_tui_package_exports_overlay(self) -> None:
-        import app.tui as tui
+        import pana.tui as tui
 
         assert hasattr(tui, "OverlayHandle")
         assert hasattr(tui, "OverlayOptions")
         assert hasattr(tui, "OverlayMargin")
 
     def test_tui_package_exports_keybindings(self) -> None:
-        import app.tui as tui
+        import pana.tui as tui
 
         assert hasattr(tui, "KeybindingsManager")
         assert hasattr(tui, "TUI_KEYBINDINGS")
 
     def test_components_package_exports(self) -> None:
-        import app.tui.components as comps
+        import pana.tui.components as comps
 
         assert hasattr(comps, "Box")
         assert hasattr(comps, "Editor")
@@ -759,7 +759,7 @@ class TestInitExports:
         assert hasattr(comps, "CancellableLoader")
 
     def test_tui_package_exports_terminal_image(self) -> None:
-        import app.tui as tui
+        import pana.tui as tui
 
         assert hasattr(tui, "allocate_image_id")
         assert hasattr(tui, "calculate_image_rows")
@@ -770,7 +770,7 @@ class TestInitExports:
         assert hasattr(tui, "get_image_dimensions")
 
     def test_tui_package_exports_fuzzy(self) -> None:
-        import app.tui as tui
+        import pana.tui as tui
 
         assert hasattr(tui, "fuzzy_match")
         assert hasattr(tui, "fuzzy_filter")

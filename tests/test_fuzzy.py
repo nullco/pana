@@ -7,7 +7,7 @@ token swapping.
 
 from __future__ import annotations
 
-from app.tui.fuzzy import fuzzy_filter, fuzzy_match
+from pana.tui.fuzzy import fuzzy_filter, fuzzy_match
 
 # ---------------------------------------------------------------------------
 # fuzzy_match

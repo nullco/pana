@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.tui.keys import (
+from pana.tui.keys import (
     matches_key,
     parse_key,
     set_kitty_protocol_active,

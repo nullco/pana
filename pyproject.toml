@@ -1,9 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "pana"
 version = "0.1.0"
-description = "A coding agent with a minimalist TUI."
+description = "A minimalist AI coding agent with a custom terminal UI."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
+authors = [
+    { name = "Juan", email = "juan@example.com" },
+]
+keywords = ["ai", "coding-agent", "tui", "copilot", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Terminals",
+]
 dependencies = [
     "pydantic-ai",
     "pyperclip>=1.11.0",
@@ -21,7 +43,19 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "requests-mock",
+    "vulture>=2.15",
 ]
+
+[project.urls]
+Homepage = "https://github.com/juan/pana"
+Repository = "https://github.com/juan/pana"
+Issues = "https://github.com/juan/pana/issues"
+
+[project.scripts]
+pana = "pana.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pana"]
 
 [tool.ruff]
 line-length = 100
@@ -36,9 +70,3 @@ line-length = 100
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-
-[dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-    "vulture>=2.15",
-]

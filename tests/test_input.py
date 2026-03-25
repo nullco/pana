@@ -5,7 +5,7 @@ Covers basic input handling, Emacs-style kill ring operations, and undo.
 
 from __future__ import annotations
 
-from app.tui.components.input import Input
+from pana.tui.components.input import Input
 
 # ---------------------------------------------------------------------------
 # Helpers

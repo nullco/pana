@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.tui.utils import visible_width, wrap_text_with_ansi
+from pana.tui.utils import visible_width, wrap_text_with_ansi
 
 # ---------------------------------------------------------------------------
 # Underline styling

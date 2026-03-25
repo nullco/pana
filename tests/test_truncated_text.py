@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from app.tui.components.truncated_text import TruncatedText
-from app.tui.utils import visible_width
+from pana.tui.components.truncated_text import TruncatedText
+from pana.tui.utils import visible_width
 
 
 def test_pads_output_to_match_width() -> None:
