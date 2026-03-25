@@ -1,14 +1,13 @@
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from pydantic_ai._agent_graph import CallToolsNode, End, ModelRequestNode
 from pydantic_ai.agent import Agent as PydanticAgent
 from pydantic_ai.messages import ToolCallPart, ToolReturnPart
-from pydantic_ai.result import FinalResult
 
-from pana.agents.context import collect_agents_md
+from pana.agents.system_prompt import build_system_prompt
 from pana.agents.tools import tool_bash, tool_edit, tool_read, tool_write
 from pana.ai.providers.model import Model
 
@@ -56,7 +55,7 @@ class Agent:
 
     def __init__(self, model: Model) -> None:
         self._model = model
-        self._system_prompt = collect_agents_md()
+        self._system_prompt = build_system_prompt()
         self._agent = self._build_agent()
         self._message_history = None
 
@@ -83,7 +82,7 @@ class Agent:
 
     def clear_history(self) -> None:
         self._message_history = None
-        self._system_prompt = collect_agents_md()
+        self._system_prompt = build_system_prompt()
         self._agent = self._build_agent()
 
     async def stream(
