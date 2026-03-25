@@ -98,8 +98,8 @@ The editor uses Emacs-style keybindings by default:
 
 | Variable           | Default  | Description                        |
 |--------------------|----------|------------------------------------|
-| `AGENT_LOG_LEVEL`  | `INFO`   | Python logging level               |
-| `AGENT_LOG_FILE`   | (none)   | Log to file instead of null handler|
+| `PANA_LOG_LEVEL`  | `INFO`   | Python logging level               |
+| `PANA_LOG_FILE`   | (none)   | Log to file instead of null handler|
 
 Configure in `.env` (loaded automatically via `python-dotenv`).
 

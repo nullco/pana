@@ -51,8 +51,8 @@ python -m pana
 
 | Variable           | Default  | Description                        |
 |--------------------|----------|------------------------------------|
-| `AGENT_LOG_LEVEL`  | `INFO`   | Python logging level               |
-| `AGENT_LOG_FILE`   | (none)   | Log to file instead of null handler|
+| `PANA_LOG_LEVEL`  | `INFO`   | Python logging level               |
+| `PANA_LOG_FILE`   | (none)   | Log to file instead of null handler|
 
 ## Development
 
