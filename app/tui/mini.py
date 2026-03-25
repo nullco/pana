@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -164,6 +165,19 @@ def _highlight_code(code: str, lang: str | None) -> list[str]:
     if highlighted.endswith("\n"):
         highlighted = highlighted[:-1]
     return highlighted.split("\n")
+
+
+# ---------------------------------------------------------------------------
+# @file reference expansion
+# ---------------------------------------------------------------------------
+
+# Matches @"quoted path" or @unquoted_path — strips the @ so the LLM sees bare paths
+_AT_FILE_RE = re.compile(r'@"([^"]+)"|@(\S+)')
+
+
+def _strip_at_prefixes(text: str) -> str:
+    """Strip ``@`` prefixes from file references so the LLM sees bare paths."""
+    return _AT_FILE_RE.sub(lambda m: m.group(1) or m.group(2), text)
 
 
 # ---------------------------------------------------------------------------
@@ -544,6 +558,9 @@ class MiniApp:
         if not self.agent or self._awaiting_response:
             return
         self._awaiting_response = True
+
+        # Strip @ prefixes so the LLM sees bare file paths
+        user_text = _strip_at_prefixes(user_text)
 
         # Loader: accent spinner, dim message (mirrors BorderedLoader colors)
         loader = Loader(self.tui, _accent, _dim, "Working...")
