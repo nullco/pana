@@ -16,7 +16,7 @@ logging.basicConfig(
 
 
 def main():
-    from pana.tui.mini import run
+    from pana.main import run
 
     run()
 
