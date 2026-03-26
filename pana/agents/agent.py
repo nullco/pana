@@ -11,6 +11,7 @@ from pydantic_ai.agent import Agent as PydanticAgent
 from pydantic_ai.messages import TextPart, ToolCallPart, ToolReturnPart
 
 from pana.agents.system_prompt import build_system_prompt
+from pana.agents.tool_streams import build_stream_handlers
 from pana.agents.tools import tool_bash, tool_edit, tool_read, tool_write
 from pana.ai.providers.model import Model
 
@@ -179,12 +180,8 @@ class Agent:
             self.set_model(model)
 
         call_started: dict[str, float] = {}
-        # tool_call_ids for which we already fired an early ToolCallEvent
         emitted_early_ids: set[str] = set()
-        # per-write-call: how many content lines were in the last update we sent
-        write_content_lines: dict[str, int] = {}
-        # per-edit-call: track which fields have been emitted to throttle updates
-        edit_emitted_fields: dict[str, set[str]] = {}
+        stream_handlers = build_stream_handlers()
 
         async with self._agent.iter(
             user_input, message_history=self._message_history
@@ -226,46 +223,20 @@ class Agent:
                                         )
                                     elif (
                                         tid in emitted_early_ids
-                                        and part.tool_name in ("tool_write", "tool_edit")
+                                        and part.tool_name in stream_handlers
                                         and isinstance(part.args, str)
                                     ):
-                                        # ── Subsequent snapshots for tool_write/tool_edit ──
-                                        # Stream partial args so the UI can show the path
-                                        # and growing content/diff preview in real time.
                                         partial = _try_extract_partial_args(part.args)
                                         if partial and "path" in partial:
-                                            if part.tool_name == "tool_write":
-                                                # For write: throttle by line count
-                                                content = partial.get("content", "")
-                                                cur_lines = content.count("\n") + (
-                                                    1
-                                                    if content and not content.endswith("\n")
-                                                    else 0
+                                            handler = stream_handlers[part.tool_name]
+                                            if handler.should_emit_update(tid, partial):
+                                                event_handler(
+                                                    ToolCallUpdateEvent(
+                                                        tool_call_id=part.tool_call_id,
+                                                        tool_name=part.tool_name,
+                                                        args=partial,
+                                                    )
                                                 )
-                                                if cur_lines > write_content_lines.get(tid, 0):
-                                                    write_content_lines[tid] = cur_lines
-                                                    event_handler(
-                                                        ToolCallUpdateEvent(
-                                                            tool_call_id=part.tool_call_id,
-                                                            tool_name=part.tool_name,
-                                                            args=partial,
-                                                        )
-                                                    )
-                                            else:
-                                                # For edit: emit when path first appears,
-                                                # and again when old_text+new_text are both
-                                                # complete (triggering the diff preview).
-                                                prev = edit_emitted_fields.get(tid, set())
-                                                cur = set(partial.keys())
-                                                if cur - prev:
-                                                    edit_emitted_fields[tid] = cur
-                                                    event_handler(
-                                                        ToolCallUpdateEvent(
-                                                            tool_call_id=part.tool_call_id,
-                                                            tool_name=part.tool_name,
-                                                            args=partial,
-                                                        )
-                                                    )
 
                     # Advance the graph — run() returns the cached _result set
                     # by stream(), so the node is NOT re-executed.
