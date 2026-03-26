@@ -17,53 +17,6 @@ uv run python main.py
 uv run pytest
 ```
 
-## Project Structure
-
-```
-pana/
-├── main.py                        # Alt entry point (loads .env, runs TUI)
-├── pana/__main__.py               # Package entry point (python -m pana)
-├── state.py                       # Persistent JSON state (~/.pana/state.json)
-├── agents/
-│   └── agent.py                   # Agent wrapper around pydantic-ai (streaming, history)
-├── ai/providers/
-│   ├── factory.py                 # Provider registry (get_provider, get_providers)
-│   ├── model.py                   # Model dataclass (name, instance, provider)
-│   ├── provider.py                # Provider protocol (auth, build_model, get_models)
-│   └── copilot/
-│       ├── auth.py                # GitHub Copilot OAuth device flow + token exchange
-│       └── provider.py            # CopilotProvider implementation
-├── app/tui/
-│   ├── mini.py                    # Main TUI app (MiniApp class, colors, commands, layout)
-│   ├── tui.py                     # TUI framework (render loop, focus, containers)
-│   ├── terminal.py                # Terminal abstraction (ProcessTerminal)
-│   ├── keybindings.py             # Keybinding definitions and manager
-│   ├── keys.py                    # Key matching utilities
-│   ├── autocomplete.py            # Slash command + file autocomplete
-│   ├── fuzzy.py                   # Fuzzy matching
-│   ├── kill_ring.py               # Emacs-style kill ring
-│   ├── undo_stack.py              # Undo/redo stack
-│   ├── stdin_buffer.py            # Stdin buffering
-│   ├── editor_component.py        # Editor integration
-│   ├── terminal_image.py          # Terminal image rendering
-│   ├── utils.py                   # TUI utilities
-│   └── components/                # UI components
-│       ├── editor.py              # Multi-line editor with autocomplete
-│       ├── markdown.py            # Markdown renderer (syntax highlighting via Pygments)
-│       ├── footer.py              # Status bar (cwd, model info)
-│       ├── input.py               # Single-line input
-│       ├── text.py                # Text display
-│       ├── loader.py              # Animated spinner
-│       ├── select_list.py         # Searchable selection list
-│       ├── settings_list.py       # Settings list
-│       ├── box.py                 # Box container
-│       ├── spacer.py              # Vertical spacer
-│       ├── image.py               # Image component
-│       ├── truncated_text.py      # Truncated text display
-│       └── cancellable_loader.py  # Cancellable loader
-└── tests/                         # pytest tests for TUI components
-```
-
 ## Key Architecture Decisions
 
 - **pydantic-ai** is used as the LLM abstraction layer. The `Agent` class wraps `pydantic_ai.agent.Agent` for streaming and message history management.
