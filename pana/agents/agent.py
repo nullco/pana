@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -66,16 +67,16 @@ StreamEvent = ToolCallEvent | ToolCallUpdateEvent | ToolResultEvent | TextEvent
 # Partial-JSON parser for streaming tool_write args
 # ---------------------------------------------------------------------------
 
-def _try_extract_partial_write_args(args_str: str) -> dict[str, str] | None:
-    """Best-effort extraction of tool_write args from a partial (still-streaming) JSON string.
+def _try_extract_partial_args(args_str: str) -> dict[str, str] | None:
+    """Best-effort extraction of tool args from a partial (still-streaming) JSON string.
 
     The LLM streams args as raw JSON text token by token, so ``args_str`` is
     typically an incomplete JSON object like::
 
         {"path": "foo.py", "content": "import os\\nimport sys\\n
 
-    We try to extract whatever is already available so the UI can show the
-    content preview growing in real time.
+    We try to extract whatever is already available so the UI can show
+    previews growing in real time.
     """
     if not args_str:
         return None
@@ -90,38 +91,36 @@ def _try_extract_partial_write_args(args_str: str) -> dict[str, str] | None:
 
     out: dict[str, str] = {}
 
-    # Extract the completed "path" value.  It's a short string that arrives
-    # well before the (potentially huge) content, so it's safe to match as a
-    # complete JSON string literal.
-    path_m = re.search(r'"path"\s*:\s*("(?:[^"\\]|\\.)*?")', args_str)
-    if path_m:
-        try:
-            out["path"] = json.loads(path_m.group(1))
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    # Extract the partial "content" value — everything after its opening quote.
-    content_m = re.search(r'"content"\s*:\s*"', args_str)
-    if content_m:
-        raw = args_str[content_m.end():]
-        # Wrap in quotes and try json.loads so we get proper escape decoding
-        # (e.g. \\n → actual newline).  This fails if a JSON escape sequence
-        # is split across the stream boundary (e.g. trailing bare backslash).
-        try:
-            out["content"] = json.loads('"' + raw + '"')
-        except (json.JSONDecodeError, ValueError):
-            # Strip the trailing incomplete escape and try once more.
-            trimmed = raw.rstrip("\\")
+    # Extract completed JSON string values for known keys.
+    # Short values (like "path") arrive well before large ones ("content",
+    # "old_text") so we can display them immediately.
+    for key in ("path", "content", "old_text", "new_text"):
+        m = re.search(rf'"{key}"\s*:\s*("(?:[^"\\]|\\.)*?")', args_str)
+        if m:
             try:
-                out["content"] = json.loads('"' + trimmed + '"')
+                out[key] = json.loads(m.group(1))
             except (json.JSONDecodeError, ValueError):
-                # Last resort: manual substitution for the most common escapes.
-                out["content"] = (
-                    trimmed.replace("\\n", "\n")
-                    .replace("\\t", "\t")
-                    .replace('\\"', '"')
-                    .replace("\\\\", "\\")
-                )
+                pass
+
+    # For "content" specifically, also try to extract a partial (unclosed) value
+    # so we can stream the growing file content preview.
+    if "content" not in out:
+        content_m = re.search(r'"content"\s*:\s*"', args_str)
+        if content_m:
+            raw = args_str[content_m.end():]
+            try:
+                out["content"] = json.loads('"' + raw + '"')
+            except (json.JSONDecodeError, ValueError):
+                trimmed = raw.rstrip("\\")
+                try:
+                    out["content"] = json.loads('"' + trimmed + '"')
+                except (json.JSONDecodeError, ValueError):
+                    out["content"] = (
+                        trimmed.replace("\\n", "\n")
+                        .replace("\\t", "\t")
+                        .replace('\\"', '"')
+                        .replace("\\\\", "\\")
+                    )
 
     return out if out else None
 
@@ -184,6 +183,8 @@ class Agent:
         emitted_early_ids: set[str] = set()
         # per-write-call: how many content lines were in the last update we sent
         write_content_lines: dict[str, int] = {}
+        # per-edit-call: track which fields have been emitted to throttle updates
+        edit_emitted_fields: dict[str, set[str]] = {}
 
         async with self._agent.iter(
             user_input, message_history=self._message_history
@@ -225,29 +226,46 @@ class Agent:
                                         )
                                     elif (
                                         tid in emitted_early_ids
-                                        and part.tool_name == "tool_write"
+                                        and part.tool_name in ("tool_write", "tool_edit")
                                         and isinstance(part.args, str)
                                     ):
-                                        # ── Subsequent snapshots for tool_write ──
-                                        # Stream the growing content into the existing
-                                        # box by emitting a ToolCallUpdateEvent whenever
-                                        # the content has at least one more line than the
-                                        # last update we sent.
-                                        partial = _try_extract_partial_write_args(part.args)
-                                        if partial and "content" in partial:
-                                            content = partial["content"]
-                                            cur_lines = content.count("\n") + (
-                                                1 if content and not content.endswith("\n") else 0
-                                            )
-                                            if cur_lines > write_content_lines.get(tid, 0):
-                                                write_content_lines[tid] = cur_lines
-                                                event_handler(
-                                                    ToolCallUpdateEvent(
-                                                        tool_call_id=part.tool_call_id,
-                                                        tool_name=part.tool_name,
-                                                        args=partial,
-                                                    )
+                                        # ── Subsequent snapshots for tool_write/tool_edit ──
+                                        # Stream partial args so the UI can show the path
+                                        # and growing content/diff preview in real time.
+                                        partial = _try_extract_partial_args(part.args)
+                                        if partial and "path" in partial:
+                                            if part.tool_name == "tool_write":
+                                                # For write: throttle by line count
+                                                content = partial.get("content", "")
+                                                cur_lines = content.count("\n") + (
+                                                    1
+                                                    if content and not content.endswith("\n")
+                                                    else 0
                                                 )
+                                                if cur_lines > write_content_lines.get(tid, 0):
+                                                    write_content_lines[tid] = cur_lines
+                                                    event_handler(
+                                                        ToolCallUpdateEvent(
+                                                            tool_call_id=part.tool_call_id,
+                                                            tool_name=part.tool_name,
+                                                            args=partial,
+                                                        )
+                                                    )
+                                            else:
+                                                # For edit: emit when path first appears,
+                                                # and again when old_text+new_text are both
+                                                # complete (triggering the diff preview).
+                                                prev = edit_emitted_fields.get(tid, set())
+                                                cur = set(partial.keys())
+                                                if cur - prev:
+                                                    edit_emitted_fields[tid] = cur
+                                                    event_handler(
+                                                        ToolCallUpdateEvent(
+                                                            tool_call_id=part.tool_call_id,
+                                                            tool_name=part.tool_name,
+                                                            args=partial,
+                                                        )
+                                                    )
 
                     # Advance the graph — run() returns the cached _result set
                     # by stream(), so the node is NOT re-executed.
@@ -319,6 +337,11 @@ class Agent:
                                         )
                                     )
                             break
+
+                    # Yield to the event loop so the TUI can render the
+                    # result (bg color transition) before text streaming
+                    # starts on the next ModelRequestNode.
+                    await asyncio.sleep(0)
                 else:
                     # Unknown node type, just advance
                     node = await agent_run.next(node)

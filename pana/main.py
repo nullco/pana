@@ -92,6 +92,9 @@ _warning         = _fg(255, 255,   0)   # #ffff00  yellow
 _heading         = _fg(240, 198, 116)   # #f0c674  warm gold  → md headings
 _link            = _fg(129, 162, 190)   # #81a2be  steel blue → md links
 _tool_output     = _fg(128, 128, 128)   # #808080  gray → tool result text
+_diff_added      = _fg(181, 189, 104)   # #b5bd68  green (vars.green) → diff added lines
+_diff_removed    = _fg(204, 102, 102)   # #cc6666  red   (vars.red)   → diff removed lines
+_diff_context    = _fg(128, 128, 128)   # #808080  gray  (vars.gray)  → diff context lines
 
 # -- Background palette ------------------------------------------------------
 _user_msg_bg_fn      = _bg( 52,  53,  65)   # #343541  user message background
@@ -104,6 +107,7 @@ def _bold(s: str)          -> str: return f"\x1b[1m{s}\x1b[22m"
 def _italic(s: str)        -> str: return f"\x1b[3m{s}\x1b[23m"
 def _underline(s: str)     -> str: return f"\x1b[4m{s}\x1b[24m"
 def _strikethrough(s: str) -> str: return f"\x1b[9m{s}\x1b[29m"
+def _inverse(s: str)       -> str: return f"\x1b[7m{s}\x1b[27m"
 
 # ---------------------------------------------------------------------------
 # Syntax highlighting — custom Pygments style matching dark.json syntax colors
@@ -286,6 +290,99 @@ def _shorten_path(path: str) -> str:
     return path
 
 
+def _render_diff(diff_string: str) -> str:
+    """Render a pi-style diff string with ANSI colors.
+
+    Parses lines of the form ``+NNN content``, ``-NNN content``, `` NNN content``
+    and ``     ...`` and applies green/red/dim colors respectively.
+
+    When there is exactly one removed + one added line in sequence (a single-line
+    modification), intra-line word-level diff highlighting is applied using
+    inverse video on the changed segments.
+    """
+    import difflib as _difflib
+
+    lines = diff_string.split("\n")
+    result: list[str] = []
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not line:
+            result.append("")
+            i += 1
+            continue
+
+        # Ellipsis (skipped lines)
+        stripped = line.strip()
+        if stripped == "...":
+            result.append(_diff_context(line))
+            i += 1
+            continue
+
+        prefix = line[0] if line else " "
+
+        if prefix == "-":
+            # Check for a single removed+added pair → intra-line highlight
+            if (
+                i + 1 < len(lines)
+                and lines[i + 1]
+                and lines[i + 1][0] == "+"
+                and (i + 2 >= len(lines) or not lines[i + 2] or lines[i + 2][0] != "+")
+            ):
+                # Also verify no more consecutive removes before this
+                old_line = lines[i]
+                new_line = lines[i + 1]
+                # Extract the content portion after the line-number field
+                # Format: "- NNNN content" or "+  NNN content"
+                import re as _re
+
+                old_m = _re.match(r"^([+-]\s*\d+\s)", old_line)
+                new_m = _re.match(r"^([+-]\s*\d+\s)", new_line)
+                if old_m and new_m:
+                    old_prefix_str = old_m.group(1)
+                    new_prefix_str = new_m.group(1)
+                    old_content = old_line[old_m.end():]
+                    new_content = new_line[new_m.end():]
+
+                    # Word-level diff
+                    word_diff = list(
+                        _difflib.ndiff(
+                            old_content.split(), new_content.split()
+                        )
+                    )
+                    old_parts: list[str] = []
+                    new_parts: list[str] = []
+                    for wd in word_diff:
+                        if wd.startswith("- "):
+                            old_parts.append(_inverse(wd[2:]))
+                        elif wd.startswith("+ "):
+                            new_parts.append(_inverse(wd[2:]))
+                        elif wd.startswith("  "):
+                            old_parts.append(wd[2:])
+                            new_parts.append(wd[2:])
+                        # skip "? " hint lines
+
+                    result.append(
+                        _diff_removed(old_prefix_str) + _diff_removed(" ".join(old_parts))
+                    )
+                    result.append(
+                        _diff_added(new_prefix_str) + _diff_added(" ".join(new_parts))
+                    )
+                    i += 2
+                    continue
+
+            result.append(_diff_removed(line))
+        elif prefix == "+":
+            result.append(_diff_added(line))
+        else:
+            result.append(_diff_context(line))
+        i += 1
+
+    return "\n".join(result)
+
+
+
 def _format_tool_call_text(tool_name: str, args: dict | str | None) -> str:
     """Format the call header line for a tool invocation.
 
@@ -435,6 +532,7 @@ class _ToolView:
     args: dict | str | None
     box: Box
     call_text_component: Text  # first child — updated by ToolCallUpdateEvent
+    diff_preview: str | None = None  # cached diff shown in renderCall (edit tool)
 
 
 # ---------------------------------------------------------------------------
@@ -640,9 +738,30 @@ class MiniApp:
                     tv = tool_views.get(event.tool_call_id) if event.tool_call_id else None
                     if tv is not None:
                         tv.args = event.args
-                        tv.call_text_component.set_text(
-                            _format_tool_call_text(event.tool_name, event.args)
-                        )
+                        call_text = _format_tool_call_text(event.tool_name, event.args)
+
+                        # For tool_edit: compute diff preview when args are
+                        # complete and append it to the call text (like pi-mono
+                        # renderCall).  Store on tv so renderResult can skip it.
+                        if (
+                            event.tool_name == "tool_edit"
+                            and isinstance(event.args, dict)
+                            and event.args.get("old_text")
+                            and event.args.get("new_text")
+                            and event.args.get("path")
+                        ):
+                            from pana.agents.tools import compute_edit_diff
+
+                            diff_str = compute_edit_diff(
+                                event.args["path"],
+                                event.args["old_text"],
+                                event.args["new_text"],
+                            )
+                            if diff_str:
+                                tv.diff_preview = diff_str
+                                call_text += "\n\n" + _render_diff(diff_str)
+
+                        tv.call_text_component.set_text(call_text)
 
                 elif isinstance(event, ToolResultEvent):
                     # Find the matching tool view
