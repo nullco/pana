@@ -242,11 +242,11 @@ class ProcessTerminal:
 
         saved_handler = self._on_input
         self._on_input = None
-        last_data_time = asyncio.get_event_loop().time()
+        last_data_time = asyncio.get_running_loop().time()
 
         def _on_data(_: str) -> None:
             nonlocal last_data_time
-            last_data_time = asyncio.get_event_loop().time()
+            last_data_time = asyncio.get_running_loop().time()
 
         if self._stdin_buffer is not None:
             prev_on_data = self._stdin_buffer.on_data
@@ -255,10 +255,10 @@ class ProcessTerminal:
             prev_on_data = None
 
         try:
-            end_time = asyncio.get_event_loop().time() + max_ms / 1000.0
+            end_time = asyncio.get_running_loop().time() + max_ms / 1000.0
             slice_s = min(idle_ms, 10) / 1000.0
             while True:
-                now = asyncio.get_event_loop().time()
+                now = asyncio.get_running_loop().time()
                 if now >= end_time:
                     break
                 if now - last_data_time >= idle_ms / 1000.0:
@@ -339,5 +339,5 @@ class ProcessTerminal:
                 self.write("\x1b[>4;2m")
                 self._modify_other_keys_active = True
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         self._kitty_fallback_handle = loop.call_later(0.15, _fallback)

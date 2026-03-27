@@ -578,7 +578,7 @@ class TUI(Container):
             return
         self._render_requested = True
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             loop.call_soon(self._do_render)
         except RuntimeError:
             self._do_render()

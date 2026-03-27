@@ -2,38 +2,39 @@
 
 from __future__ import annotations
 
-import asyncio
+import pytest
 
 from pana.agents.tools import tool_bash
 
 
+@pytest.mark.asyncio
 class TestBash:
-    def test_echo(self, tmp_dir):
-        result = asyncio.run(tool_bash("echo hello"))
+    async def test_echo(self, tmp_dir):
+        result = await tool_bash("echo hello")
         assert "hello" in result
 
-    def test_stderr(self, tmp_dir):
-        result = asyncio.run(tool_bash("echo err >&2"))
+    async def test_stderr(self, tmp_dir):
+        result = await tool_bash("echo err >&2")
         assert "err" in result
 
-    def test_exit_code(self, tmp_dir):
-        result = asyncio.run(tool_bash("exit 42"))
+    async def test_exit_code(self, tmp_dir):
+        result = await tool_bash("exit 42")
         assert "42" in result
 
-    def test_timeout(self, tmp_dir):
-        result = asyncio.run(tool_bash("sleep 10", timeout=1))
+    async def test_timeout(self, tmp_dir):
+        result = await tool_bash("sleep 10", timeout=1)
         assert "timed out" in result
 
-    def test_cwd(self, tmp_dir):
-        result = asyncio.run(tool_bash("pwd"))
+    async def test_cwd(self, tmp_dir):
+        result = await tool_bash("pwd")
         assert str(tmp_dir) in result
 
-    def test_no_output(self, tmp_dir):
-        result = asyncio.run(tool_bash("true"))
+    async def test_no_output(self, tmp_dir):
+        result = await tool_bash("true")
         assert result == "(no output)"
 
-    def test_multiline_output(self, tmp_dir):
-        result = asyncio.run(tool_bash("echo a && echo b && echo c"))
+    async def test_multiline_output(self, tmp_dir):
+        result = await tool_bash("echo a && echo b && echo c")
         assert "a" in result
         assert "b" in result
         assert "c" in result

@@ -278,7 +278,7 @@ class StdinBuffer:
                     self.on_data(seq)
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             self._flush_handle = loop.call_later(self._timeout_ms / 1000.0, _do_flush)
         except RuntimeError:
             pass

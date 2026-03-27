@@ -31,7 +31,8 @@ async def tool_bash(command: str, timeout: int | None = None) -> str:
     except asyncio.TimeoutError:
         try:
             proc.kill()  # type: ignore[union-attr]
-        except ProcessLookupError:
+            await proc.communicate()
+        except (ProcessLookupError, OSError):
             pass
         return f"Error: command timed out after {effective_timeout}s"
     except OSError as e:
