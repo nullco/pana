@@ -296,15 +296,19 @@ def test_resize_handler_does_not_use_force() -> None:
     assert tui.previous_height == 24
     assert len(tui.previous_lines) == 1
 
-    # Trigger resize — should NOT reset state (no force)
+    # Trigger resize — should NOT reset state (no force).
+    # _handle_resize calls request_render() without force=True,
+    # so previous_lines should NOT be emptied before the render.
+    # The render detects the size change naturally via width_changed.
     term._columns = 60
     term._rows = 24
     tui._handle_resize()
 
-    # previous_lines should still be intact (not reset)
+    # After the render, previous_width is updated to the new value
+    assert tui.previous_width == 60
+    # previous_lines should reflect the rendered content (not emptied by force)
     assert tui.previous_lines is not None
     assert len(tui.previous_lines) == 1
-    assert tui.previous_width == 80  # not yet updated until render
 
 
 def test_resize_narrow_then_wide_round_trip() -> None:
@@ -328,18 +332,16 @@ def test_resize_narrow_then_wide_round_trip() -> None:
 
 
 def test_force_render_triggers_full_clear() -> None:
-    """request_render(force=True) should set previousWidth=-1 which
-    triggers width_changed and thus a full clear on next render."""
+    """request_render(force=True) should trigger width_changed
+    and thus a full clear on the next render."""
     term = StubTerminal(columns=80, rows=24)
     content = ["forced"]
     tui = _setup_tui(term, content)
 
+    # request_render(force=True) sets previous_width=-1 and immediately
+    # renders (synchronous fallback when no event loop), so the full
+    # clear should already be in the output.
     tui.request_render(force=True)
 
-    # After force, previous_width should be -1
-    assert tui.previous_width == -1
-    assert tui.previous_height == -1
-
-    tui._do_render()
     buf = term.last_write()
     assert _FULL_CLEAR in buf
