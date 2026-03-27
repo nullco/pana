@@ -1,15 +1,19 @@
-<p align="center">
-  <img src="assets/banner.png" alt="Pana" width="600">
-</p>
-
-# Pana
+```
+                             
+  ██████   █████  ███▄    █  █████  
+  ██   ██ ██   ██ ████▄  ██ ██   ██ 
+  ██████  ███████ ██ ▀█▄ ██ ███████ 
+  ██      ██   ██ ██  ▀████ ██   ██ 
+  ██      ██   ██ ██   ▀███ ██   ██ 
+                             
+```
 
 A minimalist AI coding agent built on [pydantic-ai](https://ai.pydantic.dev/), featuring a custom terminal UI backported from the [pi.dev](https://pi.dev) coding agent.
 
 ## Features
 
 - **[pydantic-ai](https://ai.pydantic.dev/)** — Uses pydantic-ai as the LLM abstraction layer for streaming and tool use
-- **Custom TUI** — Terminal UI backported from the [pi.dev coding agent](https://pi.dev), rendering directly with ANSI escape codes and truecolor
+- **Custom TUI** — Terminal UI backported from the [PI coding agent](https://pi.dev), rendering directly with ANSI escape codes and truecolor
 - **[GitHub Copilot](https://github.com/features/copilot)** integration via OAuth device flow
 - **Streaming responses** with Markdown rendering and syntax highlighting
 - **Emacs-style keybindings** with kill ring, undo/redo
