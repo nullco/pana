@@ -33,11 +33,15 @@ class Footer:
         self._dim = dim_fn
         self._model_name: str | None = None
         self._provider_name: str | None = None
+        self._thinking_level: str | None = None
         self._cached_branch: str | None = _get_git_branch()
 
     def set_model(self, model_name: str | None, provider_name: str | None) -> None:
         self._model_name = model_name
         self._provider_name = provider_name
+
+    def set_thinking_level(self, level: str | None) -> None:
+        self._thinking_level = level
 
     def invalidate(self) -> None:
         self._cached_branch = _get_git_branch()
@@ -57,6 +61,13 @@ class Footer:
             right_side = f"({self._provider_name}) {self._model_name}" if self._provider_name else self._model_name
         else:
             right_side = "no model selected — /model to choose"
+
+        # Append thinking level indicator
+        if self._thinking_level:
+            if self._thinking_level == "off":
+                right_side = f"{right_side} • thinking off"
+            else:
+                right_side = f"{right_side} • {self._thinking_level}"
 
         right_width = visible_width(right_side)
         if right_width >= width:

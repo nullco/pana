@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # Thinking levels — maps to openai_reasoning_effort in ModelSettings
 # ---------------------------------------------------------------------------
 
-THINKING_LEVELS = ("low", "medium", "high")
+THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh")
 
 
 # ---------------------------------------------------------------------------
@@ -176,10 +176,12 @@ class Agent:
         self._thinking_level = level
 
     def _build_model_settings(self) -> ModelSettings | None:
-        if not self._thinking_level:
+        if not self._thinking_level or self._thinking_level == "off":
             return None
+        # xhigh is clamped to high for the API (matches pi behaviour)
+        effort = "high" if self._thinking_level == "xhigh" else self._thinking_level
         return ModelSettings(
-            openai_reasoning_effort=self._thinking_level,
+            openai_reasoning_effort=effort,
             openai_reasoning_summary="auto",
         )
 

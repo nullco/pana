@@ -624,8 +624,10 @@ class MiniApp:
         if self._footer:
             if self.agent:
                 self._footer.set_model(self.agent.model_name, self.agent.provider_name)
+                self._footer.set_thinking_level(self.agent.thinking_level)
             else:
                 self._footer.set_model(None, None)
+                self._footer.set_thinking_level(None)
             self.tui.request_render()
 
     def _show_selector(self, component: object, focus_target: object | None = None) -> Callable[[], None]:
@@ -1000,6 +1002,7 @@ class MiniApp:
                 state.set("thinking_level", value)
                 if self.agent:
                     self.agent.set_thinking_level(value)
+                self._update_footer()
             elif setting_id == "hide_thinking_block":
                 self._hide_thinking_block = value == "on"
                 state.set("hide_thinking_block", self._hide_thinking_block)

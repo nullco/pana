@@ -271,11 +271,12 @@ def test_thinking_level_and_traces_independent(tmp_path) -> None:
 
 
 def test_thinking_levels_tuple() -> None:
-    assert THINKING_LEVELS == ("low", "medium", "high")
+    assert THINKING_LEVELS == ("off", "minimal", "low", "medium", "high", "xhigh")
 
 
-def test_thinking_levels_contains_medium() -> None:
-    assert "medium" in THINKING_LEVELS
+def test_thinking_levels_contains_all() -> None:
+    for level in ("off", "minimal", "low", "medium", "high", "xhigh"):
+        assert level in THINKING_LEVELS
 
 
 # ===================================================================
@@ -329,13 +330,30 @@ def test_agent_model_settings_high() -> None:
     assert settings["openai_reasoning_effort"] == "high"
 
 
+def test_agent_model_settings_off() -> None:
+    """When thinking is 'off', model_settings should be None."""
+    agent = _make_agent("off")
+    assert agent._build_model_settings() is None
+
+
+def test_agent_model_settings_xhigh_clamped() -> None:
+    """xhigh should be clamped to high for the API."""
+    agent = _make_agent("xhigh")
+    settings = agent._build_model_settings()
+    assert settings is not None
+    assert settings["openai_reasoning_effort"] == "high"
+
+
 def test_agent_model_settings_all_levels() -> None:
-    """All levels should produce valid model_settings."""
+    """All non-off levels should produce valid model_settings."""
     for level in THINKING_LEVELS:
         agent = _make_agent(level)
         settings = agent._build_model_settings()
-        assert settings is not None
-        assert settings["openai_reasoning_effort"] == level
+        if level == "off":
+            assert settings is None
+        else:
+            expected = "high" if level == "xhigh" else level
+            assert settings["openai_reasoning_effort"] == expected
 
 
 # ===================================================================
