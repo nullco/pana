@@ -8,7 +8,8 @@ from dataclasses import dataclass
 
 from pydantic_ai._agent_graph import CallToolsNode, End, ModelRequestNode
 from pydantic_ai.agent import Agent as PydanticAgent
-from pydantic_ai.messages import TextPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import TextPart, ThinkingPart, ToolCallPart, ToolReturnPart
+from pydantic_ai.settings import ModelSettings
 
 from pana.agents.system_prompt import build_system_prompt
 from pana.agents.tool_streams import build_stream_handlers
@@ -16,6 +17,12 @@ from pana.agents.tools import tool_bash, tool_edit, tool_read, tool_write
 from pana.ai.providers.model import Model
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Thinking levels — maps to openai_reasoning_effort in ModelSettings
+# ---------------------------------------------------------------------------
+
+THINKING_LEVELS = ("low", "medium", "high")
 
 
 # ---------------------------------------------------------------------------
@@ -60,8 +67,15 @@ class TextEvent:
     is_complete: bool = False
 
 
+@dataclass
+class ThinkingEvent:
+    """Fired for thinking/reasoning content from the model."""
+
+    text: str
+
+
 # A stream handler receives these events
-StreamEvent = ToolCallEvent | ToolCallUpdateEvent | ToolResultEvent | TextEvent
+StreamEvent = ToolCallEvent | ToolCallUpdateEvent | ToolResultEvent | TextEvent | ThinkingEvent
 
 
 # ---------------------------------------------------------------------------
@@ -128,8 +142,9 @@ def _try_extract_partial_args(args_str: str) -> dict[str, str] | None:
 
 class Agent:
 
-    def __init__(self, model: Model) -> None:
+    def __init__(self, model: Model, thinking_level: str = "medium") -> None:
         self._model = model
+        self._thinking_level = thinking_level
         self._system_prompt = build_system_prompt()
         self._agent = self._build_agent()
         self._message_history = None
@@ -150,6 +165,23 @@ class Agent:
     @property
     def provider_name(self) -> str:
         return self._model.provider.name
+
+    @property
+    def thinking_level(self) -> str:
+        return self._thinking_level
+
+    def set_thinking_level(self, level: str) -> None:
+        if level not in THINKING_LEVELS:
+            raise ValueError(f"Invalid thinking level: {level!r}. Must be one of {THINKING_LEVELS}")
+        self._thinking_level = level
+
+    def _build_model_settings(self) -> ModelSettings | None:
+        if not self._thinking_level:
+            return None
+        return ModelSettings(
+            openai_reasoning_effort=self._thinking_level,
+            openai_reasoning_summary="auto",
+        )
 
     def set_model(self, model: Model) -> None:
         self._model = model
@@ -184,7 +216,9 @@ class Agent:
         stream_handlers = build_stream_handlers()
 
         async with self._agent.iter(
-            user_input, message_history=self._message_history
+            user_input,
+            message_history=self._message_history,
+            model_settings=self._build_model_settings(),
         ) as agent_run:
             node = agent_run.next_node
             while not isinstance(node, End):
@@ -193,15 +227,32 @@ class Agent:
                     # as soon as the tool_name token arrives — well before the
                     # full (potentially large) args JSON is received.
                     last_text = ""
+                    last_thinking = ""
                     async with node.stream(agent_run.ctx) as stream:
                         async for response in stream.stream_responses(debounce_by=0.05):
+                            # The Responses API emits individual parts per
+                            # streaming delta, so we must concatenate all parts
+                            # of the same type to get the accumulated text.
+                            cur_thinking = "".join(
+                                p.content
+                                for p in response.parts
+                                if isinstance(p, ThinkingPart) and p.content
+                            )
+                            if cur_thinking and cur_thinking != last_thinking:
+                                last_thinking = cur_thinking
+                                event_handler(ThinkingEvent(text=cur_thinking))
+
+                            cur_text = "".join(
+                                p.content
+                                for p in response.parts
+                                if isinstance(p, TextPart) and p.content
+                            )
+                            if cur_text != last_text:
+                                last_text = cur_text
+                                event_handler(TextEvent(text=cur_text))
+
                             for part in response.parts:
-                                if isinstance(part, TextPart):
-                                    # Only emit when text has actually grown
-                                    if part.content != last_text:
-                                        last_text = part.content
-                                        event_handler(TextEvent(text=part.content))
-                                elif isinstance(part, ToolCallPart):
+                                if isinstance(part, ToolCallPart):
                                     tid = part.tool_call_id or ""
                                     if part.tool_name and tid not in emitted_early_ids:
                                         # ── First detection: fire early ToolCallEvent ──

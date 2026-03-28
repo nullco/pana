@@ -40,7 +40,15 @@ from pygments.token import (
 from pygments.util import ClassNotFound as _PygClassNotFound
 
 from pana import __version__ as _version
-from pana.agents.agent import Agent, TextEvent, ToolCallEvent, ToolCallUpdateEvent, ToolResultEvent
+from pana.agents.agent import (
+    THINKING_LEVELS,
+    Agent,
+    TextEvent,
+    ThinkingEvent,
+    ToolCallEvent,
+    ToolCallUpdateEvent,
+    ToolResultEvent,
+)
 from pana.ai.providers.factory import get_provider, get_providers
 from pana.state import state
 from pana.tui.autocomplete import CombinedAutocompleteProvider, SlashCommand
@@ -48,9 +56,10 @@ from pana.tui.components.box import Box
 from pana.tui.components.editor import Editor, EditorOptions, EditorTheme, SelectListTheme
 from pana.tui.components.footer import Footer
 from pana.tui.components.loader import Loader
-from pana.tui.components.markdown import Markdown, MarkdownTheme
+from pana.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
 from pana.tui.components.select_list import SelectItem, SelectList
 from pana.tui.components.select_list import SelectListTheme as SLTheme
+from pana.tui.components.settings_list import SettingItem, SettingsList, SettingsListTheme
 from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 from pana.tui.terminal import ProcessTerminal
@@ -95,6 +104,7 @@ _tool_output     = _fg(128, 128, 128)   # #808080  gray → tool result text
 _diff_added      = _fg(181, 189, 104)   # #b5bd68  green (vars.green) → diff added lines
 _diff_removed    = _fg(204, 102, 102)   # #cc6666  red   (vars.red)   → diff removed lines
 _diff_context    = _fg(128, 128, 128)   # #808080  gray  (vars.gray)  → diff context lines
+_thinking_text   = _fg(128, 128, 128)   # #808080  gray  (thinkingText) → thinking traces
 
 # -- Background palette ------------------------------------------------------
 _user_msg_bg_fn      = _bg( 52,  53,  65)   # #343541  user message background
@@ -231,6 +241,15 @@ _md_theme = MarkdownTheme(
     highlight_code=_highlight_code,
 )
 
+# SettingsList: accent for selected, muted for descriptions, dim for hints
+_settings_theme = SettingsListTheme(
+    label=lambda s, sel: _accent(s) if sel else s,
+    value=lambda s, sel: _accent(s) if sel else _muted(s),
+    description=_muted,
+    cursor=_accent("❯ "),
+    hint=_dim,
+)
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -238,6 +257,7 @@ _md_theme = MarkdownTheme(
 COMMANDS: dict[str, str] = {
     "login": "Authenticate with a provider",
     "model": "Select a model",
+    "settings": "Configure thinking level, display options",
     "new": "Start a new session",
     "help": "Show available commands",
     "quit": "Exit",
@@ -560,6 +580,7 @@ class MiniApp:
         self._editor: Editor | None = None
         self._footer: Footer | None = None
         self._awaiting_response = False
+        self._hide_thinking_block: bool = state.get("hide_thinking_block", False)
 
     def _setup_ui(self) -> None:
         # Footer — uses dim (#666666) for all text, matching theme.fg("dim", …)
@@ -653,6 +674,9 @@ class MiniApp:
             elif cmd == "model":
                 asyncio.ensure_future(self._cmd_model())
                 return
+            elif cmd == "settings":
+                asyncio.ensure_future(self._cmd_settings())
+                return
             elif cmd == "help":
                 help_lines = [_bold("Commands:")]
                 for c, desc in COMMANDS.items():
@@ -695,6 +719,9 @@ class MiniApp:
 
         # Markdown response component (may be replaced after tool calls)
         md: Markdown | None = None
+        # Thinking trace component (reset per text/tool boundary)
+        thinking_md: Markdown | None = None
+        thinking_placeholder: Text | None = None
 
         # Track tool views for bg color transitions
         tool_views: dict[str, _ToolView] = {}
@@ -702,11 +729,44 @@ class MiniApp:
 
         try:
             def event_handler(event) -> None:
-                nonlocal md
+                nonlocal md, thinking_md, thinking_placeholder
 
                 # Keep loader pinned to the bottom: remove it, add new
                 # content, then re-append it so it stays below everything.
                 self._chat_container.remove_child(loader)
+
+                if isinstance(event, ThinkingEvent):
+                    if self._hide_thinking_block:
+                        if thinking_placeholder is None:
+                            self._add_message(Spacer(1))
+                            thinking_placeholder = Text(
+                                _italic(_thinking_text("Thinking...")),
+                                padding_x=1,
+                                padding_y=0,
+                            )
+                            self._add_message(thinking_placeholder)
+                    else:
+                        if thinking_md is None:
+                            self._add_message(Spacer(1))
+                            thinking_md = Markdown(
+                                "",
+                                padding_x=1,
+                                padding_y=0,
+                                theme=_md_theme,
+                                default_text_style=DefaultTextStyle(
+                                    color=_thinking_text, italic=True
+                                ),
+                            )
+                            self._add_message(thinking_md)
+                        thinking_md.set_text(event.text)
+
+                    self._add_message(loader)
+                    self.tui.request_render()
+                    return
+
+                # Any non-thinking event resets the thinking component
+                thinking_md = None
+                thinking_placeholder = None
 
                 if isinstance(event, ToolCallEvent):
                     md = None
@@ -903,7 +963,8 @@ class MiniApp:
                 if self.agent:
                     self.agent.set_model(model)
                 else:
-                    self.agent = Agent(model)
+                    thinking_level = state.get("thinking_level", "medium")
+                    self.agent = Agent(model, thinking_level=thinking_level)
                 state.set("provider", provider_name)
                 state.set("model", model_id)
                 self._add_message(
@@ -914,14 +975,57 @@ class MiniApp:
                 self._add_message(Text(_error(f"Failed: {e}"), padding_x=1, padding_y=0))
             self._add_message(Spacer(1))
 
+    async def _cmd_settings(self) -> None:
+        items = [
+            SettingItem(
+                id="thinking_level",
+                label="Thinking level",
+                current_value=state.get("thinking_level", "medium"),
+                description="Reasoning effort sent to the model (requires gpt-5-mini or o-series)",
+                values=list(THINKING_LEVELS),
+            ),
+            SettingItem(
+                id="hide_thinking_block",
+                label="Hide thinking",
+                current_value="on" if state.get("hide_thinking_block", False) else "off",
+                description="Collapse thinking traces to a placeholder",
+                values=["off", "on"],
+            ),
+        ]
+
+        done_event = asyncio.Event()
+
+        def on_change(setting_id: str, value: str) -> None:
+            if setting_id == "thinking_level":
+                state.set("thinking_level", value)
+                if self.agent:
+                    self.agent.set_thinking_level(value)
+            elif setting_id == "hide_thinking_block":
+                self._hide_thinking_block = value == "on"
+                state.set("hide_thinking_block", self._hide_thinking_block)
+            self.tui.request_render()
+
+        def on_cancel() -> None:
+            restore()
+            done_event.set()
+
+        settings_list = SettingsList(
+            items, max_visible=8, theme=_settings_theme,
+            on_change=on_change, on_cancel=on_cancel,
+        )
+
+        restore = self._show_selector(settings_list)
+        await done_event.wait()
+
     async def run(self) -> None:
         # Restore saved model
         model_id = state.get("model")
         provider_name = state.get("provider")
         if model_id and provider_name:
             try:
+                thinking_level = state.get("thinking_level", "medium")
                 model = await get_provider(provider_name).build_model(model_id)
-                self.agent = Agent(model)
+                self.agent = Agent(model, thinking_level=thinking_level)
             except Exception:
                 pass
 

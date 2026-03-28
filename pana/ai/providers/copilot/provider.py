@@ -2,7 +2,7 @@ import asyncio
 import time
 
 from openai import AsyncOpenAI
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIResponsesModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from pana.ai.providers.model import Model
@@ -74,7 +74,7 @@ Code: {response.user_code}""")
             default_headers=COPILOT_HEADERS,
         )
         provider = OpenAIProvider(openai_client=openai_client)
-        model = OpenAIChatModel(model_name, provider=provider)
+        model = OpenAIResponsesModel(model_name, provider=provider)
         return Model(model_name, model, self)
 
     def get_models(self) -> list[str]:
