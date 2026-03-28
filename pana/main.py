@@ -605,6 +605,7 @@ class MiniApp:
         )
         self._editor.set_autocomplete_provider(autocomplete)
         self._editor.on_submit = self._on_submit
+        self._editor.on_action = self._on_action
 
         # Header: accent-colored title (mirrors pi-tui header style)
         self._chat_container.add_child(
@@ -647,6 +648,39 @@ class MiniApp:
 
     def _add_message(self, component: object) -> None:
         self._chat_container.add_child(component)  # type: ignore[arg-type]
+        self.tui.request_render()
+
+    def _on_action(self, action_id: str) -> None:
+        if action_id == "app.thinking.cycle":
+            self._cycle_thinking_level()
+        elif action_id == "app.thinking.toggle":
+            self._toggle_thinking_block_visibility()
+
+    def _cycle_thinking_level(self) -> None:
+        if not self.agent:
+            self._add_message(
+                Text(_muted("No model selected"), padding_x=1, padding_y=0),
+            )
+            return
+        levels = list(THINKING_LEVELS)
+        current = self.agent.thinking_level
+        idx = levels.index(current) if current in levels else 0
+        next_level = levels[(idx + 1) % len(levels)]
+        self.agent.set_thinking_level(next_level)
+        state.set("thinking_level", next_level)
+        self._update_footer()
+        self._add_message(
+            Text(_muted(f"Thinking level: {next_level}"), padding_x=1, padding_y=0),
+        )
+        self.tui.request_render()
+
+    def _toggle_thinking_block_visibility(self) -> None:
+        self._hide_thinking_block = not self._hide_thinking_block
+        state.set("hide_thinking_block", self._hide_thinking_block)
+        label = "hidden" if self._hide_thinking_block else "visible"
+        self._add_message(
+            Text(_muted(f"Thinking blocks: {label}"), padding_x=1, padding_y=0),
+        )
         self.tui.request_render()
 
     def _on_submit(self, text: str) -> None:
@@ -983,15 +1017,15 @@ class MiniApp:
                 id="thinking_level",
                 label="Thinking level",
                 current_value=state.get("thinking_level", "medium"),
-                description="Reasoning effort sent to the model (requires gpt-5-mini or o-series)",
+                description="Reasoning depth for thinking-capable models",
                 values=list(THINKING_LEVELS),
             ),
             SettingItem(
                 id="hide_thinking_block",
                 label="Hide thinking",
-                current_value="on" if state.get("hide_thinking_block", False) else "off",
-                description="Collapse thinking traces to a placeholder",
-                values=["off", "on"],
+                current_value="true" if state.get("hide_thinking_block", False) else "false",
+                description="Hide thinking blocks in assistant responses",
+                values=["false", "true"],
             ),
         ]
 
@@ -1004,7 +1038,7 @@ class MiniApp:
                     self.agent.set_thinking_level(value)
                 self._update_footer()
             elif setting_id == "hide_thinking_block":
-                self._hide_thinking_block = value == "on"
+                self._hide_thinking_block = value == "true"
                 state.set("hide_thinking_block", self._hide_thinking_block)
             self.tui.request_render()
 

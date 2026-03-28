@@ -226,6 +226,7 @@ class Editor:
 
         self.on_submit: Callable[[str], None] | None = None
         self.on_change: Callable[[str], None] | None = None
+        self.on_action: Callable[[str], None] | None = None
         self.disable_submit = False
 
     @property
@@ -424,6 +425,13 @@ class Editor:
 
     def handle_input(self, data: str) -> None:
         kb = get_editor_keybindings()
+
+        # App-level actions — dispatched before any editor handling
+        if self.on_action:
+            for action_id in kb.get_app_actions():
+                if kb.matches(data, action_id):
+                    self.on_action(action_id)
+                    return
 
         # Jump mode
         if self._jump_mode is not None:

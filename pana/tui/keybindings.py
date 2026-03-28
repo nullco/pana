@@ -49,6 +49,9 @@ TUI_KEYBINDINGS: dict[str, dict[str, Any]] = {
     "tui.input.submit":    {"defaultKeys": "enter",        "description": "Submit input"},
     "tui.input.tab":       {"defaultKeys": "tab",          "description": "Tab / autocomplete"},
     "tui.input.copy":      {"defaultKeys": "ctrl+c",       "description": "Copy selection"},
+    # App-level actions (dispatched via Editor.on_action)
+    "app.thinking.cycle":  {"defaultKeys": "shift+tab",    "description": "Cycle thinking level"},
+    "app.thinking.toggle": {"defaultKeys": "ctrl+t",       "description": "Toggle thinking blocks"},
     # Select / autocomplete list
     "tui.select.up":        {"defaultKeys": "up",              "description": "Move selection up"},
     "tui.select.down":      {"defaultKeys": "down",            "description": "Move selection down"},
@@ -149,6 +152,10 @@ class KeybindingsManager:
 
     def get_keys(self, keybinding: str) -> list[str]:
         return list(self._keys_by_id.get(keybinding, []))
+
+    def get_app_actions(self) -> list[str]:
+        """Return all keybinding IDs that start with 'app.'."""
+        return [id_ for id_ in self._definitions if id_.startswith("app.")]
 
     def get_definition(self, keybinding: str) -> dict[str, Any] | None:
         return self._definitions.get(keybinding)
