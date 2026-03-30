@@ -178,10 +178,8 @@ class Agent:
     def _build_model_settings(self) -> ModelSettings | None:
         if not self._thinking_level or self._thinking_level == "off":
             return None
-        # xhigh is clamped to high for the API (matches pi behaviour)
-        effort = "high" if self._thinking_level == "xhigh" else self._thinking_level
         return ModelSettings(
-            openai_reasoning_effort=effort,
+            thinking=self._thinking_level,
             openai_reasoning_summary="auto",
         )
 

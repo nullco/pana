@@ -323,11 +323,11 @@ def test_agent_set_invalid_thinking_level() -> None:
 
 
 def test_agent_model_settings_high() -> None:
-    """When thinking is 'high', model_settings should include openai_reasoning_effort."""
+    """When thinking is 'high', model_settings should use the unified thinking field."""
     agent = _make_agent("high")
     settings = agent._build_model_settings()
     assert settings is not None
-    assert settings["openai_reasoning_effort"] == "high"
+    assert settings["thinking"] == "high"
 
 
 def test_agent_model_settings_off() -> None:
@@ -336,12 +336,12 @@ def test_agent_model_settings_off() -> None:
     assert agent._build_model_settings() is None
 
 
-def test_agent_model_settings_xhigh_clamped() -> None:
-    """xhigh should be clamped to high for the API."""
+def test_agent_model_settings_xhigh() -> None:
+    """xhigh should be passed through to the unified thinking field."""
     agent = _make_agent("xhigh")
     settings = agent._build_model_settings()
     assert settings is not None
-    assert settings["openai_reasoning_effort"] == "high"
+    assert settings["thinking"] == "xhigh"
 
 
 def test_agent_model_settings_all_levels() -> None:
@@ -352,8 +352,7 @@ def test_agent_model_settings_all_levels() -> None:
         if level == "off":
             assert settings is None
         else:
-            expected = "high" if level == "xhigh" else level
-            assert settings["openai_reasoning_effort"] == expected
+            assert settings["thinking"] == level
 
 
 # ===================================================================
