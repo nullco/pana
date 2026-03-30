@@ -10,10 +10,11 @@
 
 ### 1. Bump the version
 
-Update the version in **both** files:
+Update the version in pyproject.toml:
 
 - `pyproject.toml` → `version = "X.Y.Z"`
-- `pana/__init__.py` → `__version__ = "X.Y.Z"`
+
+Note: this project reads its runtime version from pyproject.toml; you do not need to update `pana/__init__.py`.
 
 ### 2. Clean old builds
 
