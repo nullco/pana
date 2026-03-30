@@ -1,5 +1,5 @@
 """Pana — A minimalist AI coding agent with a custom terminal UI."""
 
-from importlib.metadata import version
-
-__version__ = version("pana")
+# NOTE: version string is kept in-sync with pyproject.toml for publishing.
+# PUBLISHING.md instructs to update the version in both files.
+__version__ = "0.4.0"

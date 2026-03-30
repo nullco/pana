@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pana"
-version = "0.3.0"
+version = "0.4.0"
 description = "A minimalist AI coding agent"
 readme = "README.md"
 license = "MIT"
