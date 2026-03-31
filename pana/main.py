@@ -55,6 +55,7 @@ from pana.tui.autocomplete import CombinedAutocompleteProvider, SlashCommand
 from pana.tui.components.box import Box
 from pana.tui.components.editor import Editor, EditorOptions, EditorTheme, SelectListTheme
 from pana.tui.components.footer import Footer
+from pana.tui.components.cancellable_loader import CancellableLoader
 from pana.tui.components.loader import Loader
 from pana.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
 from pana.tui.components.select_list import SelectItem, SelectList
@@ -580,6 +581,7 @@ class MiniApp:
         self._editor: Editor | None = None
         self._footer: Footer | None = None
         self._awaiting_response = False
+        self._stream_task: asyncio.Task | None = None
         self._hide_thinking_block: bool = state.get("hide_thinking_block", False)
 
     def _setup_ui(self) -> None:
@@ -739,7 +741,7 @@ class MiniApp:
         self._add_message(Spacer(1))
         self._add_message(_UserMessage(text, padding_x=1, padding_y=1, custom_bg_fn=_user_msg_bg_fn))
 
-        asyncio.ensure_future(self._stream_response(text))
+        self._stream_task = asyncio.ensure_future(self._stream_response(text))
 
     async def _stream_response(self, user_text: str) -> None:
         if not self.agent or self._awaiting_response:
@@ -750,8 +752,11 @@ class MiniApp:
         user_text = _strip_at_prefixes(user_text)
 
         # Loader: accent spinner, dim message (mirrors BorderedLoader colors)
-        loader = Loader(self.tui, _accent, _dim, "Working...")
+        # CancellableLoader captures ESC to abort the running stream.
+        loader = CancellableLoader(self.tui, _accent, _dim, "Working...")
+        loader.on_abort = lambda: self._stream_task and self._stream_task.cancel()
         self._add_message(loader)
+        self.tui.set_focus(loader)
 
         # Markdown response component (may be replaced after tool calls)
         md: Markdown | None = None
@@ -898,6 +903,17 @@ class MiniApp:
 
             await self.agent.stream(user_text, event_handler)
 
+        except asyncio.CancelledError:
+            loader.stop()
+            self._chat_container.remove_child(loader)
+            for tv in list(tool_views.values()) + fallback_tool_views:
+                tv.box.set_bg_fn(_tool_error_bg_fn)
+            self._add_message(Spacer(1))
+            self._add_message(
+                Text(_error("Operation aborted"), padding_x=1, padding_y=0)
+            )
+            self.tui.request_render()
+
         except Exception as e:
             logger.exception("Error during agent stream")
             loader.stop()
@@ -913,6 +929,8 @@ class MiniApp:
             loader.stop()
             self._chat_container.remove_child(loader)
             self._awaiting_response = False
+            self._stream_task = None
+            self.tui.set_focus(self._editor)
             self.tui.request_render()
 
     async def _cmd_login(self) -> None:
