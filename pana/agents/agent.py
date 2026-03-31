@@ -1,7 +1,5 @@
 import asyncio
-import inspect
 import logging
-import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -22,30 +20,15 @@ from pana.ai.providers.model import Model
 
 logger = logging.getLogger(__name__)
 
-_original_unraisablehook = sys.unraisablehook
 
+class _CancelledByEvent(BaseException):
+    """Raised inside node.stream()'s async-with body to trigger clean pydantic-ai
+    teardown (stream_done.set + wrap_task.cancel) when the user cancels via an
+    asyncio.Event rather than task.cancel().  Using a distinct BaseException
+    subclass prevents it from being caught by broad ``except Exception`` clauses
+    and clearly communicates intent.
+    """
 
-def _unraisablehook(args) -> None:
-    # Suppress two specific "Exception ignored in: <coroutine …>" warnings that
-    # pydantic-ai emits when streaming is cancelled mid-flight.  The root cause
-    # is that task.cancel() can interrupt node.stream().__aenter__() before its
-    # internal `wrap_task` is set up, leaving _streaming_handler /
-    # wrap_model_request coroutines that get GC-closed in the wrong
-    # contextvars.Context.  Fixing it properly would require changes inside
-    # pydantic-ai; for now we just hide the noise so it doesn't corrupt the TUI.
-    # See: https://github.com/pydantic/pydantic-ai/issues (context-reset on cancel)
-    obj = args.object
-    if inspect.iscoroutine(obj):
-        qual = getattr(obj, '__qualname__', '')
-        if qual in (
-            'ModelRequestNode.stream.<locals>._streaming_handler',
-            'CombinedCapability.wrap_model_request',
-        ):
-            return
-    _original_unraisablehook(args)
-
-
-sys.unraisablehook = _unraisablehook
 
 # ---------------------------------------------------------------------------
 # Thinking levels — maps to openai_reasoning_effort in ModelSettings
@@ -185,18 +168,22 @@ class Agent:
         self,
         user_input: str,
         event_handler: Callable[[StreamEvent], None],
+        cancel_event: asyncio.Event | None = None,
     ) -> None:
         """Run the agent and emit StreamEvents for text, thinking, and tool activity.
 
         Uses the pydantic-ai iter() graph API so we can interleave streamed text
         with tool call/result events.  See the private helpers below for the
         per-node logic.
-        """
-        try:
-            await self._ensure_auth()
-            state = _RunState()
 
-            async with self._agent.iter(
+        cancel_event: when set, exits the streaming loop cleanly at the next
+        token boundary without task.cancel() — avoids pydantic-ai context-manager
+        teardown issues and lets the caller restore the UI immediately.
+        """
+        await self._ensure_auth()
+        state = _RunState()
+
+        async with self._agent.iter(
                 user_input,
                 message_history=self._message_history,
                 model_settings=self._build_model_settings(),
@@ -204,9 +191,11 @@ class Agent:
                 try:
                     node = agent_run.next_node
                     while not isinstance(node, End):
+                        if cancel_event and cancel_event.is_set():
+                            break
                         if isinstance(node, ModelRequestNode):
                             node = await self._stream_model_request_node(
-                                node, agent_run, state, event_handler
+                                node, agent_run, state, event_handler, cancel_event
                             )
                         elif isinstance(node, CallToolsNode):
                             node = await self._process_call_tools_node(
@@ -216,9 +205,6 @@ class Agent:
                             node = await agent_run.next(node)
                 finally:
                     self._message_history = agent_run.all_messages()
-        except asyncio.CancelledError:
-            raise
-
     # ------------------------------------------------------------------
     # Auth helper
     # ------------------------------------------------------------------
@@ -240,56 +226,93 @@ class Agent:
         agent_run,
         state: _RunState,
         event_handler: Callable[[StreamEvent], None],
+        cancel_event: asyncio.Event | None = None,
     ):
         """Stream a ModelRequestNode, emitting Text/Thinking/ToolCall events.
 
-        Tool calls are fired as early ToolCallEvents as soon as the tool_name
-        token arrives (before full args), so the TUI can show activity immediately.
-        A ToolCallUpdateEvent follows as args stream in, throttled per-tool.
+        Each response chunk races against cancel_event via asyncio.wait().  When
+        the event fires, _CancelledByEvent is raised *inside* the async-with body
+        so pydantic-ai's finally block (stream_done + wrap_task cleanup) always
+        runs — no dangling tasks, no leaked HTTP connections, no context warnings.
 
-        The CancelledError workaround: we catch cancellation *inside* the
-        async-with so the context manager can exit in the same contextvars
-        context it was entered in.  Re-raising outside avoids the pydantic-ai
-        "was created in a different Context" / "coroutine ignored GeneratorExit"
-        noise.  See _unraisablehook above.
+        For app-exit task.cancel(), CancelledError hits the asyncio.wait() await
+        inside the body (same safe zone), so pydantic-ai cleanup also runs there.
         """
         last_text = ""
         last_thinking = ""
-        cancelled = False
+        _user_cancelled = False
 
-        async with node.stream(agent_run.ctx) as stream:
-            try:
-                async for response in stream.stream_responses(debounce_by=0.05):
-                    cur_thinking = "".join(
-                        p.content
-                        for p in response.parts
-                        if isinstance(p, ThinkingPart) and p.content
-                    )
-                    if cur_thinking and cur_thinking != last_thinking:
-                        last_thinking = cur_thinking
-                        event_handler(ThinkingEvent(text=cur_thinking))
+        try:
+            async with node.stream(agent_run.ctx) as stream:
+                # One persistent waiter for the cancel signal — reused across
+                # all iterations so we don't create an extra task per token.
+                cancel_waiter = (
+                    asyncio.ensure_future(cancel_event.wait()) if cancel_event else None
+                )
+                try:
+                    stream_iter = stream.stream_responses(debounce_by=0.05).__aiter__()
+                    while True:
+                        next_item = asyncio.ensure_future(stream_iter.__anext__())
+                        waitables: set[asyncio.Future] = {next_item}
+                        if cancel_waiter:
+                            waitables.add(cancel_waiter)
 
-                    cur_text = "".join(
-                        p.content
-                        for p in response.parts
-                        if isinstance(p, TextPart) and p.content
-                    )
-                    if cur_text != last_text:
-                        last_text = cur_text
-                        event_handler(TextEvent(text=cur_text))
+                        done, _ = await asyncio.wait(
+                            waitables, return_when=asyncio.FIRST_COMPLETED
+                        )
 
-                    for part in response.parts:
-                        if isinstance(part, ToolCallPart):
-                            self._handle_streaming_tool_call(part, state, event_handler)
+                        if cancel_waiter in done:
+                            # Cancel the pending network read, then signal
+                            # pydantic-ai to tear down wrap_task cleanly.
+                            next_item.cancel()
+                            try:
+                                await next_item
+                            except BaseException:
+                                pass
+                            raise _CancelledByEvent()
 
-            except asyncio.CancelledError:
-                cancelled = True
+                        try:
+                            response = next_item.result()
+                        except StopAsyncIteration:
+                            break
 
-        if cancelled:
-            raise asyncio.CancelledError()
+                        cur_thinking = "".join(
+                            p.content
+                            for p in response.parts
+                            if isinstance(p, ThinkingPart) and p.content
+                        )
+                        if cur_thinking and cur_thinking != last_thinking:
+                            last_thinking = cur_thinking
+                            event_handler(ThinkingEvent(text=cur_thinking))
 
-        # Advance the graph — run() returns the cached _result set by stream(),
-        # so the node is NOT re-executed.
+                        cur_text = "".join(
+                            p.content
+                            for p in response.parts
+                            if isinstance(p, TextPart) and p.content
+                        )
+                        if cur_text != last_text:
+                            last_text = cur_text
+                            event_handler(TextEvent(text=cur_text))
+
+                        for part in response.parts:
+                            if isinstance(part, ToolCallPart):
+                                self._handle_streaming_tool_call(part, state, event_handler)
+
+                finally:
+                    # Clean up the cancel waiter whether we exited normally,
+                    # via _CancelledByEvent, or via app-exit CancelledError.
+                    if cancel_waiter and not cancel_waiter.done():
+                        cancel_waiter.cancel()
+
+        except _CancelledByEvent:
+            _user_cancelled = True
+
+        if _user_cancelled:
+            # Don't advance the graph — the outer loop will see cancel_event
+            # is set and break before attempting to re-process this node.
+            return node
+
+        # Advance the graph — stream() caches _result so node is NOT re-executed.
         return await agent_run.next(node)
 
     def _handle_streaming_tool_call(

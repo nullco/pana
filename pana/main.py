@@ -53,10 +53,9 @@ from pana.ai.providers.factory import get_provider, get_providers
 from pana.state import state
 from pana.tui.autocomplete import CombinedAutocompleteProvider, SlashCommand
 from pana.tui.components.box import Box
+from pana.tui.components.cancellable_loader import CancellableLoader
 from pana.tui.components.editor import Editor, EditorOptions, EditorTheme, SelectListTheme
 from pana.tui.components.footer import Footer
-from pana.tui.components.cancellable_loader import CancellableLoader
-from pana.tui.components.loader import Loader
 from pana.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
 from pana.tui.components.select_list import SelectItem, SelectList
 from pana.tui.components.select_list import SelectListTheme as SLTheme
@@ -583,6 +582,8 @@ class MiniApp:
         self._awaiting_response = False
         self._stream_task: asyncio.Task | None = None
         self._hide_thinking_block: bool = state.get("hide_thinking_block", False)
+        self._draining: bool = False          # True while a cancelled stream drains
+        self._pending_messages: list[str] = []  # messages queued during drain
 
     def _setup_ui(self) -> None:
         # Footer — uses dim (#666666) for all text, matching theme.fg("dim", …)
@@ -737,11 +738,26 @@ class MiniApp:
             self._add_message(Spacer(1))
             return
 
-        # User message bubble: Spacer(1) + bg-padded text (mirrors UserMessageComponent)
+        # User message bubble — shown immediately even when draining so the
+        # user gets instant visual feedback that the message was received.
         self._add_message(Spacer(1))
         self._add_message(_UserMessage(text, padding_x=1, padding_y=1, custom_bg_fn=_user_msg_bg_fn))
 
+        if self._draining:
+            # The previous stream is still winding down after user cancel.
+            # Queue this message; _process_pending_messages will send it once
+            # the drain finishes.
+            self._pending_messages.append(text)
+            self.tui.request_render()
+            return
+
         self._stream_task = asyncio.ensure_future(self._stream_response(text))
+
+    def _process_pending_messages(self) -> None:
+        """Start the next queued message after a cancelled stream has drained."""
+        if self._pending_messages and self.agent:
+            next_text = self._pending_messages.pop(0)
+            self._stream_task = asyncio.ensure_future(self._stream_response(next_text))
 
     async def _stream_response(self, user_text: str) -> None:
         if not self.agent or self._awaiting_response:
@@ -751,187 +767,240 @@ class MiniApp:
         # Strip @ prefixes so the LLM sees bare file paths
         user_text = _strip_at_prefixes(user_text)
 
-        # Loader: accent spinner, dim message (mirrors BorderedLoader colors)
-        # CancellableLoader captures ESC to abort the running stream.
-        loader = CancellableLoader(self.tui, _accent, _dim, "Working...")
-        loader.on_abort = lambda: self._stream_task and self._stream_task.cancel()
-        self._add_message(loader)
-        self.tui.set_focus(loader)
-
-        # Markdown response component (may be replaced after tool calls)
-        md: Markdown | None = None
-        # Thinking trace component (reset per text/tool boundary)
-        thinking_md: Markdown | None = None
-        thinking_placeholder: Text | None = None
+        cancel_event = asyncio.Event()
+        _handler_active = True  # flipped by on_abort to silence the event handler
 
         # Track tool views for bg color transitions
         tool_views: dict[str, _ToolView] = {}
         fallback_tool_views: list[_ToolView] = []
 
-        try:
-            def event_handler(event) -> None:
-                nonlocal md, thinking_md, thinking_placeholder
+        # Markdown / thinking components — defined here so on_abort can see them
+        md: Markdown | None = None
+        thinking_md: Markdown | None = None
+        thinking_placeholder: Text | None = None
 
-                # Keep loader pinned to the bottom: remove it, add new
-                # content, then re-append it so it stays below everything.
+        # Loader: accent spinner, dim message (mirrors BorderedLoader colors)
+        loader = CancellableLoader(self.tui, _accent, _dim, "Working...")
+
+        def on_abort() -> None:
+            """Called synchronously when the user presses ESC.
+
+            Sets the cancel_event so the streaming loop exits cleanly at the
+            next token boundary, then immediately restores the UI so the user
+            can type again without waiting for the network drain to finish.
+            Messages submitted during the drain are queued and replayed once
+            _stream_response's finally block calls _process_pending_messages.
+            """
+            nonlocal _handler_active
+            cancel_event.set()
+            _handler_active = False
+
+            # Mark any in-progress tool boxes as errored
+            for tv in list(tool_views.values()) + fallback_tool_views:
+                tv.box.set_bg_fn(_tool_error_bg_fn)
+
+            # Remove loader and show the aborted notice
+            loader.stop()
+            try:
                 self._chat_container.remove_child(loader)
+            except Exception:
+                pass
+            self._add_message(Spacer(1))
+            self._add_message(Text(_error("Operation aborted"), padding_x=1, padding_y=0))
 
-                if isinstance(event, ThinkingEvent):
-                    if self._hide_thinking_block:
-                        if thinking_placeholder is None:
-                            self._add_message(Spacer(1))
-                            thinking_placeholder = Text(
-                                _italic(_thinking_text("Thinking...")),
-                                padding_x=1,
-                                padding_y=0,
-                            )
-                            self._add_message(thinking_placeholder)
-                    else:
-                        if thinking_md is None:
-                            self._add_message(Spacer(1))
-                            thinking_md = Markdown(
-                                "",
-                                padding_x=1,
-                                padding_y=0,
-                                theme=_md_theme,
-                                default_text_style=DefaultTextStyle(
-                                    color=_thinking_text, italic=True
-                                ),
-                            )
-                            self._add_message(thinking_md)
-                        thinking_md.set_text(event.text)
+            # Re-enable the editor immediately — the stream keeps draining in
+            # the background but the user can already compose the next message.
+            self._awaiting_response = False
+            self._draining = True
+            self.tui.set_focus(self._editor)
+            self.tui.request_render()
 
-                    self._add_message(loader)
-                    self.tui.request_render()
-                    return
+        loader.on_abort = on_abort
+        self._add_message(loader)
+        self.tui.set_focus(loader)
 
-                # Any non-thinking event resets the thinking component
-                thinking_md = None
-                thinking_placeholder = None
+        def event_handler(event) -> None:
+            nonlocal md, thinking_md, thinking_placeholder
 
-                if isinstance(event, ToolCallEvent):
-                    md = None
+            # After on_abort fires, silently discard any further events that
+            # arrive while the stream is still draining in the background.
+            if not _handler_active:
+                return
 
-                    # Create a Box with pending background
-                    box = Box(padding_x=1, padding_y=1, bg_fn=_tool_pending_bg_fn)
-                    call_text = _format_tool_call_text(event.tool_name, event.args)
-                    call_text_component = Text(call_text, padding_x=0, padding_y=0)
-                    box.add_child(call_text_component)
+            # Keep loader pinned to the bottom: remove it, add new
+            # content, then re-append it so it stays below everything.
+            self._chat_container.remove_child(loader)
 
-                    tv = _ToolView(
-                        tool_name=event.tool_name,
-                        args=event.args,
-                        box=box,
-                        call_text_component=call_text_component,
-                    )
-
-                    self._add_message(Spacer(1))
-                    self._add_message(box)
-
-                    if event.tool_call_id:
-                        tool_views[event.tool_call_id] = tv
-                    else:
-                        fallback_tool_views.append(tv)
-
-                elif isinstance(event, ToolCallUpdateEvent):
-                    # The early ToolCallEvent had partial/no args; now we have
-                    # the complete args — update the existing box in place.
-                    tv = tool_views.get(event.tool_call_id) if event.tool_call_id else None
-                    if tv is not None:
-                        tv.args = event.args
-                        call_text = _format_tool_call_text(event.tool_name, event.args)
-
-                        # For tool_edit: compute diff preview when args are
-                        # complete and append it to the call text (like pi-mono
-                        # renderCall).  Store on tv so renderResult can skip it.
-                        if (
-                            event.tool_name == "tool_edit"
-                            and isinstance(event.args, dict)
-                            and event.args.get("old_text")
-                            and event.args.get("new_text")
-                            and event.args.get("path")
-                        ):
-                            from pana.agents.tools import compute_edit_diff
-
-                            diff_str = compute_edit_diff(
-                                event.args["path"],
-                                event.args["old_text"],
-                                event.args["new_text"],
-                            )
-                            if diff_str:
-                                tv.diff_preview = diff_str
-                                call_text += "\n\n" + _render_diff(diff_str)
-
-                        tv.call_text_component.set_text(call_text)
-
-                elif isinstance(event, ToolResultEvent):
-                    # Find the matching tool view
-                    tv = None
-                    if event.tool_call_id:
-                        tv = tool_views.get(event.tool_call_id)
-                    if tv is None and fallback_tool_views:
-                        tv = fallback_tool_views.pop(0)
-
-                    if tv is not None:
-                        # Transition bg color
-                        if event.is_error:
-                            tv.box.set_bg_fn(_tool_error_bg_fn)
-                        else:
-                            tv.box.set_bg_fn(_tool_success_bg_fn)
-
-                        # Add result content if applicable
-                        result_text = _format_tool_result_text(
-                            tv.tool_name, tv.args,
-                            event.result, event.elapsed_s, event.is_error,
-                        )
-                        if result_text is not None:
-                            tv.box.add_child(
-                                Text(result_text, padding_x=0, padding_y=0)
-                            )
-
-                elif isinstance(event, TextEvent):
-                    if md is None:
-                        # Spacer(1) + Markdown (mirrors AssistantMessageComponent)
+            if isinstance(event, ThinkingEvent):
+                if self._hide_thinking_block:
+                    if thinking_placeholder is None:
                         self._add_message(Spacer(1))
-                        md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
-                        self._add_message(md)
-                    md.set_text(event.text)
+                        thinking_placeholder = Text(
+                            _italic(_thinking_text("Thinking...")),
+                            padding_x=1,
+                            padding_y=0,
+                        )
+                        self._add_message(thinking_placeholder)
+                else:
+                    if thinking_md is None:
+                        self._add_message(Spacer(1))
+                        thinking_md = Markdown(
+                            "",
+                            padding_x=1,
+                            padding_y=0,
+                            theme=_md_theme,
+                            default_text_style=DefaultTextStyle(
+                                color=_thinking_text, italic=True
+                            ),
+                        )
+                        self._add_message(thinking_md)
+                    thinking_md.set_text(event.text)
 
-                # Re-pin the loader below all new content
                 self._add_message(loader)
                 self.tui.request_render()
+                return
 
-            await self.agent.stream(user_text, event_handler)
+            # Any non-thinking event resets the thinking component
+            thinking_md = None
+            thinking_placeholder = None
+
+            if isinstance(event, ToolCallEvent):
+                md = None
+
+                # Create a Box with pending background
+                box = Box(padding_x=1, padding_y=1, bg_fn=_tool_pending_bg_fn)
+                call_text = _format_tool_call_text(event.tool_name, event.args)
+                call_text_component = Text(call_text, padding_x=0, padding_y=0)
+                box.add_child(call_text_component)
+
+                tv = _ToolView(
+                    tool_name=event.tool_name,
+                    args=event.args,
+                    box=box,
+                    call_text_component=call_text_component,
+                )
+
+                self._add_message(Spacer(1))
+                self._add_message(box)
+
+                if event.tool_call_id:
+                    tool_views[event.tool_call_id] = tv
+                else:
+                    fallback_tool_views.append(tv)
+
+            elif isinstance(event, ToolCallUpdateEvent):
+                # The early ToolCallEvent had partial/no args; now we have
+                # the complete args — update the existing box in place.
+                tv = tool_views.get(event.tool_call_id) if event.tool_call_id else None
+                if tv is not None:
+                    tv.args = event.args
+                    call_text = _format_tool_call_text(event.tool_name, event.args)
+
+                    # For tool_edit: compute diff preview when args are
+                    # complete and append it to the call text (like pi-mono
+                    # renderCall).  Store on tv so renderResult can skip it.
+                    if (
+                        event.tool_name == "tool_edit"
+                        and isinstance(event.args, dict)
+                        and event.args.get("old_text")
+                        and event.args.get("new_text")
+                        and event.args.get("path")
+                    ):
+                        from pana.agents.tools import compute_edit_diff
+
+                        diff_str = compute_edit_diff(
+                            event.args["path"],
+                            event.args["old_text"],
+                            event.args["new_text"],
+                        )
+                        if diff_str:
+                            tv.diff_preview = diff_str
+                            call_text += "\n\n" + _render_diff(diff_str)
+
+                    tv.call_text_component.set_text(call_text)
+
+            elif isinstance(event, ToolResultEvent):
+                # Find the matching tool view
+                tv = None
+                if event.tool_call_id:
+                    tv = tool_views.get(event.tool_call_id)
+                if tv is None and fallback_tool_views:
+                    tv = fallback_tool_views.pop(0)
+
+                if tv is not None:
+                    # Transition bg color
+                    if event.is_error:
+                        tv.box.set_bg_fn(_tool_error_bg_fn)
+                    else:
+                        tv.box.set_bg_fn(_tool_success_bg_fn)
+
+                    # Add result content if applicable
+                    result_text = _format_tool_result_text(
+                        tv.tool_name, tv.args,
+                        event.result, event.elapsed_s, event.is_error,
+                    )
+                    if result_text is not None:
+                        tv.box.add_child(
+                            Text(result_text, padding_x=0, padding_y=0)
+                        )
+
+            elif isinstance(event, TextEvent):
+                if md is None:
+                    # Spacer(1) + Markdown (mirrors AssistantMessageComponent)
+                    self._add_message(Spacer(1))
+                    md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
+                    self._add_message(md)
+                md.set_text(event.text)
+
+            # Re-pin the loader below all new content
+            self._add_message(loader)
+            self.tui.request_render()
+
+        _propagating_cancel = False
+        try:
+            await self.agent.stream(user_text, event_handler, cancel_event=cancel_event)
 
         except asyncio.CancelledError:
-            loader.stop()
-            self._chat_container.remove_child(loader)
+            # App-exit path: task.cancel() was called by asyncio.run() teardown.
+            # on_abort was NOT called so the loader is still in the chat.
+            _propagating_cancel = True
             for tv in list(tool_views.values()) + fallback_tool_views:
                 tv.box.set_bg_fn(_tool_error_bg_fn)
             self._add_message(Spacer(1))
-            self._add_message(
-                Text(_error("Operation aborted"), padding_x=1, padding_y=0)
-            )
-            self.tui.request_render()
+            self._add_message(Text(_error("Operation aborted"), padding_x=1, padding_y=0))
+            raise
 
         except Exception as e:
             logger.exception("Error during agent stream")
-            loader.stop()
-            self._chat_container.remove_child(loader)
-            # Mark any pending tools as errored
-            for tv in list(tool_views.values()) + fallback_tool_views:
-                tv.box.set_bg_fn(_tool_error_bg_fn)
-            err_md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
-            self._add_message(err_md)
-            err_md.set_text(_error(f"❌ {e}"))
+            if not cancel_event.is_set():
+                for tv in list(tool_views.values()) + fallback_tool_views:
+                    tv.box.set_bg_fn(_tool_error_bg_fn)
+                err_md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
+                self._add_message(err_md)
+                err_md.set_text(_error(f"❌ {e}"))
             self.tui.request_render()
+
         finally:
             loader.stop()
-            self._chat_container.remove_child(loader)
-            self._awaiting_response = False
+            try:
+                self._chat_container.remove_child(loader)
+            except Exception:
+                pass
+
+            if cancel_event.is_set():
+                # on_abort already restored the editor and set _draining=True.
+                # Clear the draining flag now that the stream has fully unwound.
+                self._draining = False
+            else:
+                # Normal completion or app-exit cancel: restore UI from here.
+                self._awaiting_response = False
+                self.tui.set_focus(self._editor)
+
             self._stream_task = None
-            self.tui.set_focus(self._editor)
             self.tui.request_render()
+
+            if not _propagating_cancel:
+                self._process_pending_messages()
 
     async def _cmd_login(self) -> None:
         providers = get_providers()
