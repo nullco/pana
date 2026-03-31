@@ -3,10 +3,15 @@
 Each handler decides whether a new streaming snapshot should be emitted to the
 TUI, encapsulating the tool-specific throttling logic that used to live inline
 in ``Agent.stream()``.
+
+Also provides ``try_extract_partial_args``, the helper that parses incomplete
+JSON from a still-streaming tool-call argument string.
 """
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Protocol
 
 
@@ -56,3 +61,66 @@ def build_stream_handlers() -> dict[str, ToolStreamHandler]:
         "tool_write": WriteStreamHandler(),
         "tool_edit": EditStreamHandler(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Partial-JSON parser for streaming tool args
+# ---------------------------------------------------------------------------
+
+
+def try_extract_partial_args(args_str: str) -> dict[str, str] | None:
+    """Best-effort extraction of tool args from a partial (still-streaming) JSON string.
+
+    The LLM streams args as raw JSON text token by token, so ``args_str`` is
+    typically an incomplete JSON object like::
+
+        {"path": "foo.py", "content": "import os\\nimport sys\\n
+
+    We try to extract whatever is already available so the UI can show
+    previews growing in real time.
+    """
+    if not args_str:
+        return None
+
+    # Happy path: JSON is complete — just parse it.
+    try:
+        result = json.loads(args_str)
+        if isinstance(result, dict):
+            return result
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    out: dict[str, str] = {}
+
+    # Extract completed JSON string values for known keys.
+    # Short values (like "path") arrive well before large ones ("content",
+    # "old_text") so we can display them immediately.
+    for key in ("path", "content", "old_text", "new_text"):
+        m = re.search(rf'"{key}"\s*:\s*("(?:[^"\\\\]|\\\\.)*?")', args_str)
+        if m:
+            try:
+                out[key] = json.loads(m.group(1))
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    # For "content" specifically, also try to extract a partial (unclosed) value
+    # so we can stream the growing file content preview.
+    if "content" not in out:
+        content_m = re.search(r'"content"\s*:\s*"', args_str)
+        if content_m:
+            raw = args_str[content_m.end():]
+            try:
+                out["content"] = json.loads('"' + raw + '"')
+            except (json.JSONDecodeError, ValueError):
+                trimmed = raw.rstrip("\\")
+                try:
+                    out["content"] = json.loads('"' + trimmed + '"')
+                except (json.JSONDecodeError, ValueError):
+                    out["content"] = (
+                        trimmed.replace("\\n", "\n")
+                        .replace("\\t", "\t")
+                        .replace('\\"', '"')
+                        .replace("\\\\", "\\")
+                    )
+
+    return out if out else None

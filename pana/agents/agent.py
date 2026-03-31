@@ -1,12 +1,10 @@
 import asyncio
 import inspect
-import json
 import logging
-import re
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pydantic_ai._agent_graph import CallToolsNode, End, ModelRequestNode
 from pydantic_ai.agent import Agent as PydanticAgent
@@ -14,7 +12,11 @@ from pydantic_ai.messages import TextPart, ThinkingPart, ToolCallPart, ToolRetur
 from pydantic_ai.settings import ModelSettings
 
 from pana.agents.system_prompt import build_system_prompt
-from pana.agents.tool_streams import build_stream_handlers
+from pana.agents.tool_streams import (
+    ToolStreamHandler,
+    build_stream_handlers,
+    try_extract_partial_args,
+)
 from pana.agents.tools import tool_bash, tool_edit, tool_read, tool_write
 from pana.ai.providers.model import Model
 
@@ -106,65 +108,21 @@ StreamEvent = ToolCallEvent | ToolCallUpdateEvent | ToolResultEvent | TextEvent 
 
 
 # ---------------------------------------------------------------------------
-# Partial-JSON parser for streaming tool_write args
+# Per-run mutable state — shared across node handlers within one agent.stream()
 # ---------------------------------------------------------------------------
 
-def _try_extract_partial_args(args_str: str) -> dict[str, str] | None:
-    """Best-effort extraction of tool args from a partial (still-streaming) JSON string.
 
-    The LLM streams args as raw JSON text token by token, so ``args_str`` is
-    typically an incomplete JSON object like::
+@dataclass
+class _RunState:
+    """Holds all mutable bookkeeping for a single agent run."""
 
-        {"path": "foo.py", "content": "import os\\nimport sys\\n
-
-    We try to extract whatever is already available so the UI can show
-    previews growing in real time.
-    """
-    if not args_str:
-        return None
-
-    # Happy path: JSON is complete — just parse it.
-    try:
-        result = json.loads(args_str)
-        if isinstance(result, dict):
-            return result
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    out: dict[str, str] = {}
-
-    # Extract completed JSON string values for known keys.
-    # Short values (like "path") arrive well before large ones ("content",
-    # "old_text") so we can display them immediately.
-    for key in ("path", "content", "old_text", "new_text"):
-        m = re.search(rf'"{key}"\s*:\s*("(?:[^"\\]|\\.)*?")', args_str)
-        if m:
-            try:
-                out[key] = json.loads(m.group(1))
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-    # For "content" specifically, also try to extract a partial (unclosed) value
-    # so we can stream the growing file content preview.
-    if "content" not in out:
-        content_m = re.search(r'"content"\s*:\s*"', args_str)
-        if content_m:
-            raw = args_str[content_m.end():]
-            try:
-                out["content"] = json.loads('"' + raw + '"')
-            except (json.JSONDecodeError, ValueError):
-                trimmed = raw.rstrip("\\")
-                try:
-                    out["content"] = json.loads('"' + trimmed + '"')
-                except (json.JSONDecodeError, ValueError):
-                    out["content"] = (
-                        trimmed.replace("\\n", "\n")
-                        .replace("\\t", "\t")
-                        .replace('\\"', '"')
-                        .replace("\\\\", "\\")
-                    )
-
-    return out if out else None
+    # Maps tool_call_id → monotonic start time, used to compute elapsed_s.
+    call_started: dict[str, float] = field(default_factory=dict)
+    # IDs for which an early ToolCallEvent has already been emitted during
+    # ModelRequestNode streaming, so CallToolsNode knows to send an Update.
+    emitted_early_ids: set[str] = field(default_factory=set)
+    # Per-tool handlers that throttle how often partial-arg updates are emitted.
+    stream_handlers: dict[str, ToolStreamHandler] = field(default_factory=build_stream_handlers)
 
 
 class Agent:
@@ -219,29 +177,24 @@ class Agent:
         self._system_prompt = build_system_prompt()
         self._agent = self._build_agent()
 
+    # ------------------------------------------------------------------
+    # Public streaming entry point
+    # ------------------------------------------------------------------
+
     async def stream(
         self,
         user_input: str,
         event_handler: Callable[[StreamEvent], None],
     ) -> None:
-        """Run agent with tool call visibility.
+        """Run the agent and emit StreamEvents for text, thinking, and tool activity.
 
-        Uses the iter() graph API to surface tool calls and results as they
-        happen, interleaved with streamed text output.
-
-        Early ToolCallEvents are fired as soon as the model's tool_name token
-        is known (before all args arrive).  A ToolCallUpdateEvent follows once
-        args are fully received so the UI can fill in the final display.
+        Uses the pydantic-ai iter() graph API so we can interleave streamed text
+        with tool call/result events.  See the private helpers below for the
+        per-node logic.
         """
         try:
-            if self._model.provider.should_reauthenticate():
-                await self._model.provider.reauthenticate()
-                model = await self._model.provider.build_model(self._model.name)
-                self.set_model(model)
-
-            call_started: dict[str, float] = {}
-            emitted_early_ids: set[str] = set()
-            stream_handlers = build_stream_handlers()
+            await self._ensure_auth()
+            state = _RunState()
 
             async with self._agent.iter(
                 user_input,
@@ -252,167 +205,223 @@ class Agent:
                     node = agent_run.next_node
                     while not isinstance(node, End):
                         if isinstance(node, ModelRequestNode):
-                            # Stream responses incrementally so we can detect tool calls
-                            # as soon as the tool_name token arrives — well before the
-                            # full (potentially large) args JSON is received.
-                            last_text = ""
-                            last_thinking = ""
-                            _stream_cancelled = False
-                            async with node.stream(agent_run.ctx) as stream:
-                                try:
-                                    async for response in stream.stream_responses(debounce_by=0.05):
-                                        # The Responses API emits individual parts per
-                                        # streaming delta, so we must concatenate all parts
-                                        # of the same type to get the accumulated text.
-                                        cur_thinking = "".join(
-                                            p.content
-                                            for p in response.parts
-                                            if isinstance(p, ThinkingPart) and p.content
-                                        )
-                                        if cur_thinking and cur_thinking != last_thinking:
-                                            last_thinking = cur_thinking
-                                            event_handler(ThinkingEvent(text=cur_thinking))
-
-                                        cur_text = "".join(
-                                            p.content
-                                            for p in response.parts
-                                            if isinstance(p, TextPart) and p.content
-                                        )
-                                        if cur_text != last_text:
-                                            last_text = cur_text
-                                            event_handler(TextEvent(text=cur_text))
-
-                                        for part in response.parts:
-                                            if isinstance(part, ToolCallPart):
-                                                tid = part.tool_call_id or ""
-                                                if part.tool_name and tid not in emitted_early_ids:
-                                                    # ── First detection: fire early ToolCallEvent ──
-                                                    emitted_early_ids.add(tid)
-                                                    if part.tool_call_id:
-                                                        call_started[part.tool_call_id] = time.monotonic()
-                                                    # Args are likely partial JSON — try to parse,
-                                                    # fall back to None gracefully.
-                                                    try:
-                                                        early_args: dict | str | None = part.args_as_dict()
-                                                    except Exception:
-                                                        early_args = None
-                                                    event_handler(
-                                                        ToolCallEvent(
-                                                            tool_call_id=part.tool_call_id,
-                                                            tool_name=part.tool_name,
-                                                            args=early_args,
-                                                        )
-                                                    )
-                                                elif (
-                                                        tid in emitted_early_ids
-                                                        and part.tool_name in stream_handlers
-                                                        and isinstance(part.args, str)
-                                                    ):
-                                                    partial = _try_extract_partial_args(part.args)
-                                                    if partial and "path" in partial:
-                                                        handler = stream_handlers[part.tool_name]
-                                                        if handler.should_emit_update(tid, partial):
-                                                            event_handler(
-                                                                ToolCallUpdateEvent(
-                                                                    tool_call_id=part.tool_call_id,
-                                                                    tool_name=part.tool_name,
-                                                                    args=partial,
-                                                                )
-                                                            )
-
-                                except asyncio.CancelledError:
-                                    # Catch here so `async with node.stream()` can exit
-                                    # cleanly in the same contextvars context it was
-                                    # entered in.  Letting CancelledError propagate out
-                                    # through __aexit__ causes pydantic-ai's internal
-                                    # _streaming_handler / wrap_model_request coroutines
-                                    # to be GC-ed in the wrong context, producing
-                                    # "was created in a different Context" and
-                                    # "coroutine ignored GeneratorExit" warnings.
-                                    _stream_cancelled = True
-                            # Re-raise *after* the context manager has exited normally.
-                            if _stream_cancelled:
-                                raise asyncio.CancelledError()
-
-                            # Advance the graph — run() returns the cached _result set
-                            # by stream(), so the node is NOT re-executed.
-                            node = await agent_run.next(node)
-
+                            node = await self._stream_model_request_node(
+                                node, agent_run, state, event_handler
+                            )
                         elif isinstance(node, CallToolsNode):
-                            # Emit final tool call info.  For tools already shown via an
-                            # early ToolCallEvent, send a ToolCallUpdateEvent so the UI
-                            # can fill in the complete args (e.g. the write content preview).
-                            for part in node.model_response.parts:
-                                if isinstance(part, ToolCallPart):
-                                    tid = part.tool_call_id
-                                    try:
-                                        full_args: dict | str | None = (
-                                            part.args_as_dict()
-                                            if hasattr(part, "args_as_dict")
-                                            else part.args
-                                        )
-                                    except Exception:
-                                        full_args = part.args  # type: ignore[assignment]
-
-                                    if tid not in emitted_early_ids:
-                                        # Tool call wasn't detected early (no streaming?), emit normally
-                                        if tid:
-                                            call_started[tid] = time.monotonic()
-                                        event_handler(
-                                            ToolCallEvent(
-                                                tool_call_id=tid,
-                                                tool_name=part.tool_name,
-                                                args=full_args,
-                                            )
-                                        )
-                                    else:
-                                        # Update the existing box with the final args
-                                        event_handler(
-                                            ToolCallUpdateEvent(
-                                                tool_call_id=tid,
-                                                tool_name=part.tool_name,
-                                                args=full_args,
-                                            )
-                                        )
-
-                            # Execute tools (advances the graph)
-                            node = await agent_run.next(node)
-
-                            # Get results from the last request message
-                            messages = agent_run.all_messages()
-                            for msg in reversed(messages):
-                                if msg.kind == "request":
-                                    for part in msg.parts:
-                                        if isinstance(part, ToolReturnPart):
-                                            content = part.content
-                                            result_text = content if isinstance(content, str) else str(content)
-
-                                            elapsed_s = None
-                                            tcid = part.tool_call_id
-                                            if tcid and tcid in call_started:
-                                                elapsed_s = time.monotonic() - call_started.pop(tcid)
-
-                                            is_error = result_text.lstrip().startswith("Error")
-
-                                            event_handler(
-                                                ToolResultEvent(
-                                                    tool_call_id=tcid,
-                                                    tool_name=part.tool_name,
-                                                    result=result_text,
-                                                    elapsed_s=elapsed_s,
-                                                    is_error=is_error,
-                                                )
-                                            )
-                                    break
-
-                            # Yield to the event loop so the TUI can render the
-                            # result (bg color transition) before text streaming
-                            # starts on the next ModelRequestNode.
-                            await asyncio.sleep(0)
+                            node = await self._process_call_tools_node(
+                                node, agent_run, state, event_handler
+                            )
                         else:
-                            # Unknown node type, just advance
                             node = await agent_run.next(node)
                 finally:
                     self._message_history = agent_run.all_messages()
         except asyncio.CancelledError:
             raise
+
+    # ------------------------------------------------------------------
+    # Auth helper
+    # ------------------------------------------------------------------
+
+    async def _ensure_auth(self) -> None:
+        """Re-authenticate if the provider token is close to expiry."""
+        if self._model.provider.should_reauthenticate():
+            await self._model.provider.reauthenticate()
+            model = await self._model.provider.build_model(self._model.name)
+            self.set_model(model)
+
+    # ------------------------------------------------------------------
+    # ModelRequestNode — stream text/thinking and detect tool calls early
+    # ------------------------------------------------------------------
+
+    async def _stream_model_request_node(
+        self,
+        node: ModelRequestNode,
+        agent_run,
+        state: _RunState,
+        event_handler: Callable[[StreamEvent], None],
+    ):
+        """Stream a ModelRequestNode, emitting Text/Thinking/ToolCall events.
+
+        Tool calls are fired as early ToolCallEvents as soon as the tool_name
+        token arrives (before full args), so the TUI can show activity immediately.
+        A ToolCallUpdateEvent follows as args stream in, throttled per-tool.
+
+        The CancelledError workaround: we catch cancellation *inside* the
+        async-with so the context manager can exit in the same contextvars
+        context it was entered in.  Re-raising outside avoids the pydantic-ai
+        "was created in a different Context" / "coroutine ignored GeneratorExit"
+        noise.  See _unraisablehook above.
+        """
+        last_text = ""
+        last_thinking = ""
+        cancelled = False
+
+        async with node.stream(agent_run.ctx) as stream:
+            try:
+                async for response in stream.stream_responses(debounce_by=0.05):
+                    cur_thinking = "".join(
+                        p.content
+                        for p in response.parts
+                        if isinstance(p, ThinkingPart) and p.content
+                    )
+                    if cur_thinking and cur_thinking != last_thinking:
+                        last_thinking = cur_thinking
+                        event_handler(ThinkingEvent(text=cur_thinking))
+
+                    cur_text = "".join(
+                        p.content
+                        for p in response.parts
+                        if isinstance(p, TextPart) and p.content
+                    )
+                    if cur_text != last_text:
+                        last_text = cur_text
+                        event_handler(TextEvent(text=cur_text))
+
+                    for part in response.parts:
+                        if isinstance(part, ToolCallPart):
+                            self._handle_streaming_tool_call(part, state, event_handler)
+
+            except asyncio.CancelledError:
+                cancelled = True
+
+        if cancelled:
+            raise asyncio.CancelledError()
+
+        # Advance the graph — run() returns the cached _result set by stream(),
+        # so the node is NOT re-executed.
+        return await agent_run.next(node)
+
+    def _handle_streaming_tool_call(
+        self,
+        part: ToolCallPart,
+        state: _RunState,
+        event_handler: Callable[[StreamEvent], None],
+    ) -> None:
+        """Process one ToolCallPart from the streaming response.
+
+        First sighting → emit an early ToolCallEvent (args may be partial).
+        Subsequent deltas → throttle via the per-tool stream handler and emit
+        a ToolCallUpdateEvent when the handler decides the update is worth showing.
+        """
+        tid = part.tool_call_id or ""
+
+        if part.tool_name and tid not in state.emitted_early_ids:
+            # First detection: record start time and fire the early event.
+            state.emitted_early_ids.add(tid)
+            if part.tool_call_id:
+                state.call_started[part.tool_call_id] = time.monotonic()
+            try:
+                early_args: dict | str | None = part.args_as_dict()
+            except Exception:
+                early_args = None
+            event_handler(
+                ToolCallEvent(
+                    tool_call_id=part.tool_call_id,
+                    tool_name=part.tool_name,
+                    args=early_args,
+                )
+            )
+        elif (
+            tid in state.emitted_early_ids
+            and part.tool_name in state.stream_handlers
+            and isinstance(part.args, str)
+        ):
+            # Subsequent delta: try to extract a richer partial-args preview.
+            partial = try_extract_partial_args(part.args)
+            if partial and "path" in partial:
+                handler = state.stream_handlers[part.tool_name]
+                if handler.should_emit_update(tid, partial):
+                    event_handler(
+                        ToolCallUpdateEvent(
+                            tool_call_id=part.tool_call_id,
+                            tool_name=part.tool_name,
+                            args=partial,
+                        )
+                    )
+
+    # ------------------------------------------------------------------
+    # CallToolsNode — finalise args display, execute tools, emit results
+    # ------------------------------------------------------------------
+
+    async def _process_call_tools_node(
+        self,
+        node: CallToolsNode,
+        agent_run,
+        state: _RunState,
+        event_handler: Callable[[StreamEvent], None],
+    ):
+        """Finalize tool call display, execute tools, then emit ToolResultEvents."""
+        # Emit final (complete) args for every tool call in this batch.
+        for part in node.model_response.parts:
+            if isinstance(part, ToolCallPart):
+                self._emit_final_tool_call(part, state, event_handler)
+
+        # Execute the tools (advances the graph).
+        node = await agent_run.next(node)
+
+        # Emit results from the request message that was just appended.
+        self._emit_tool_results(agent_run.all_messages(), state, event_handler)
+
+        # Yield to the event loop so the TUI can render the result box
+        # (background-colour transition) before text streaming starts again.
+        await asyncio.sleep(0)
+        return node
+
+    def _emit_final_tool_call(
+        self,
+        part: ToolCallPart,
+        state: _RunState,
+        event_handler: Callable[[StreamEvent], None],
+    ) -> None:
+        """Emit a ToolCallEvent or ToolCallUpdateEvent with the completed args."""
+        tid = part.tool_call_id
+        try:
+            full_args: dict | str | None = (
+                part.args_as_dict() if hasattr(part, "args_as_dict") else part.args
+            )
+        except Exception:
+            full_args = part.args  # type: ignore[assignment]
+
+        if tid not in state.emitted_early_ids:
+            # No early event was fired (e.g. non-streaming path) — emit now.
+            if tid:
+                state.call_started[tid] = time.monotonic()
+            event_handler(
+                ToolCallEvent(tool_call_id=tid, tool_name=part.tool_name, args=full_args)
+            )
+        else:
+            # Update the existing box with the final, complete args.
+            event_handler(
+                ToolCallUpdateEvent(tool_call_id=tid, tool_name=part.tool_name, args=full_args)
+            )
+
+    def _emit_tool_results(
+        self,
+        messages,
+        state: _RunState,
+        event_handler: Callable[[StreamEvent], None],
+    ) -> None:
+        """Scan the most recent request message for ToolReturnParts and emit events."""
+        for msg in reversed(messages):
+            if msg.kind == "request":
+                for part in msg.parts:
+                    if isinstance(part, ToolReturnPart):
+                        content = part.content
+                        result_text = content if isinstance(content, str) else str(content)
+
+                        elapsed_s = None
+                        tcid = part.tool_call_id
+                        if tcid and tcid in state.call_started:
+                            elapsed_s = time.monotonic() - state.call_started.pop(tcid)
+
+                        event_handler(
+                            ToolResultEvent(
+                                tool_call_id=tcid,
+                                tool_name=part.tool_name,
+                                result=result_text,
+                                elapsed_s=elapsed_s,
+                                is_error=result_text.lstrip().startswith("Error"),
+                            )
+                        )
+                break
