@@ -14,11 +14,10 @@ from pana.agents.agent import (
     ToolCallUpdateEvent,
     ToolResultEvent,
 )
+from pana.app.theme import italic as _italic, thinking_text as _thinking_text
 from pana.main import (
     COMMANDS,
-    _italic,
     _resolve_command,
-    _thinking_text,
 )
 from pana.state import State
 from pana.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
