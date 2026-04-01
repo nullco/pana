@@ -1,0 +1,54 @@
+{
+    "name": "dark",
+    "vars": {
+        "teal":     "#8abeb7",
+        "green":    "#b5bd68",
+        "red":      "#cc6666",
+        "gold":     "#f0c674",
+        "blue":     "#81a2be",
+        "gray":     "#808080",
+        "dimGray":  "#666666",
+        "darkGray": "#505050"
+    },
+    "colors": {
+        "accent":             "teal",
+        "borderMuted":        "darkGray",
+        "muted":              "gray",
+        "dim":                "dimGray",
+        "success":            "green",
+        "error":              "red",
+        "warning":            "#ffff00",
+
+        "mdHeading":          "gold",
+        "mdLink":             "blue",
+        "mdLinkUrl":          "dimGray",
+        "mdCode":             "teal",
+        "mdCodeBlock":        "green",
+        "mdCodeBlockBorder":  "gray",
+        "mdQuote":            "gray",
+        "mdQuoteBorder":      "gray",
+        "mdHr":               "gray",
+        "mdListBullet":       "teal",
+
+        "toolOutput":         "gray",
+        "toolDiffAdded":      "green",
+        "toolDiffRemoved":    "red",
+        "toolDiffContext":    "gray",
+        "thinkingText":       "gray",
+
+        "userMessageBg":      "#343541",
+        "toolPendingBg":      "#282832",
+        "toolSuccessBg":      "#283228",
+        "toolErrorBg":        "#3c2828",
+
+        "syntaxComment":      "#6a9955",
+        "syntaxKeyword":      "#569cd6",
+        "syntaxFunction":     "#dcdcaa",
+        "syntaxVariable":     "#9cdcfe",
+        "syntaxString":       "#ce9178",
+        "syntaxNumber":       "#b5cea8",
+        "syntaxType":         "#4ec9b0",
+        "syntaxOperator":     "#d4d4d4",
+        "syntaxPunctuation":  "#d4d4d4"
+    }
+}

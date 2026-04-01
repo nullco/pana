@@ -1,17 +1,9 @@
-"""Minimalist terminal UI — look and feel matches original pi-tui dark theme exactly.
+"""Minimalist terminal UI driven by a JSON theme system.
 
-Colors sourced from dark.json (pi-tui):
-  accent       #8abeb7   sage teal  (select prefix/text, list bullet, inline code)
-  border       #5f87ff   blue
-  borderMuted  #505050   dark gray  (editor border)
-  muted        #808080   medium gray (descriptions, scroll info, quotes, hr, code border)
-  dim          #666666   dim gray   (footer, link url, muted decorations)
-  success      #b5bd68   olive green (code blocks)
-  error        #cc6666   muted red
-  warning      #ffff00   yellow
-  mdHeading    #f0c674   warm gold
-  mdLink       #81a2be   steel blue
-  userMsgBg    #343541   dark blue-gray (user message background)
+The active theme is loaded from ``pana/themes/<name>.json`` (built-in) or
+from ``~/.pana/themes/`` / ``.pana/themes/`` (user / project overrides).
+Use ``/theme`` to switch themes at runtime; the selection is persisted in
+``~/.pana/state.json``.
 """
 from __future__ import annotations
 
@@ -23,20 +15,7 @@ import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from pygments.formatters import TerminalTrueColorFormatter
 from pygments.lexers import get_lexer_by_name
-from pygments.style import Style
-from pygments.token import (
-    Comment,
-    Error,
-    Keyword,
-    Name,
-    Number,
-    Operator,
-    Punctuation,
-    String,
-    Token,
-)
 from pygments.util import ClassNotFound as _PygClassNotFound
 
 from pana import __version__ as _version
@@ -63,6 +42,7 @@ from pana.tui.components.settings_list import SettingItem, SettingsList, Setting
 from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 from pana.tui.terminal import ProcessTerminal
+from pana.tui.theme import PanaTheme, discover_themes, load_theme
 from pana.tui.tui import TUI, Container
 
 logger = logging.getLogger(__name__)
@@ -76,98 +56,60 @@ _OSC133_ZONE_END   = "\x1b]133;B\x07"
 _OSC133_ZONE_FINAL = "\x1b]133;C\x07"
 
 # ---------------------------------------------------------------------------
-# Core color helpers — exact hex truecolor, fg-only reset (\x1b[39m)
-# Mirrors Theme.fg() / Theme.bg() from theme.js
+# Active theme — initialised to "dark" at import time; swapped by
+# _apply_theme() which is called from MiniApp.run() (to restore the saved
+# choice) and from the /theme command.
 # ---------------------------------------------------------------------------
 
-def _fg(r: int, g: int, b: int) -> Callable[[str], str]:
-    """Return a color function that applies a truecolor fg and resets only fg."""
-    code = f"\x1b[38;2;{r};{g};{b}m"
-    return lambda s: f"{code}{s}\x1b[39m"
+_current_theme: PanaTheme = load_theme("dark")
 
-def _bg(r: int, g: int, b: int) -> Callable[[str], str]:
-    """Return a color function that applies a truecolor bg and resets only bg."""
-    code = f"\x1b[48;2;{r};{g};{b}m"
-    return lambda s: f"{code}{s}\x1b[49m"
 
-# -- Foreground palette (dark.json resolved) ---------------------------------
-_accent          = _fg(138, 190, 183)   # #8abeb7  sage teal
-_border_muted    = _fg( 80,  80,  80)   # #505050  dark gray  → editor border
-_muted           = _fg(128, 128, 128)   # #808080  medium gray → descriptions, hr, quotes
-_dim             = _fg(102, 102, 102)   # #666666  dim gray   → footer, secondary text
-_success         = _fg(181, 189, 104)   # #b5bd68  olive green → code blocks
-_error           = _fg(204, 102, 102)   # #cc6666  muted red
-_warning         = _fg(255, 255,   0)   # #ffff00  yellow
-_heading         = _fg(240, 198, 116)   # #f0c674  warm gold  → md headings
-_link            = _fg(129, 162, 190)   # #81a2be  steel blue → md links
-_tool_output     = _fg(128, 128, 128)   # #808080  gray → tool result text
-_diff_added      = _fg(181, 189, 104)   # #b5bd68  green (vars.green) → diff added lines
-_diff_removed    = _fg(204, 102, 102)   # #cc6666  red   (vars.red)   → diff removed lines
-_diff_context    = _fg(128, 128, 128)   # #808080  gray  (vars.gray)  → diff context lines
-_thinking_text   = _fg(128, 128, 128)   # #808080  gray  (thinkingText) → thinking traces
+# ---------------------------------------------------------------------------
+# Thin color-wrapper functions.
+#
+# Every wrapper delegates to _current_theme so that a single _apply_theme()
+# call is enough to make all subsequent renders use the new palette —
+# including components that already captured these functions by reference.
+# ---------------------------------------------------------------------------
 
-# -- Background palette ------------------------------------------------------
-_user_msg_bg_fn      = _bg( 52,  53,  65)   # #343541  user message background
-_tool_pending_bg_fn  = _bg( 40,  40,  50)   # #282832  tool executing
-_tool_success_bg_fn  = _bg( 40,  50,  40)   # #283228  tool succeeded
-_tool_error_bg_fn    = _bg( 60,  40,  40)   # #3c2828  tool failed
+def _accent(s: str)         -> str: return _current_theme.accent(s)
+def _border_muted(s: str)   -> str: return _current_theme.border_muted(s)
+def _muted(s: str)          -> str: return _current_theme.muted(s)
+def _dim(s: str)            -> str: return _current_theme.dim(s)
+def _success(s: str)        -> str: return _current_theme.success(s)
+def _error(s: str)          -> str: return _current_theme.error(s)
+def _warning(s: str)        -> str: return _current_theme.warning(s)
+def _heading(s: str)        -> str: return _current_theme.md_heading(s)
+def _link(s: str)           -> str: return _current_theme.md_link(s)
+def _tool_output(s: str)    -> str: return _current_theme.tool_output(s)
+def _diff_added(s: str)     -> str: return _current_theme.tool_diff_added(s)
+def _diff_removed(s: str)   -> str: return _current_theme.tool_diff_removed(s)
+def _diff_context(s: str)   -> str: return _current_theme.tool_diff_context(s)
+def _thinking_text(s: str)  -> str: return _current_theme.thinking_text(s)
 
-# -- Text attributes — chalk-compatible resets (NOT \x1b[0m full reset) -----
+# Background wrappers — same delegation pattern.
+def _user_msg_bg_fn(s: str)     -> str: return _current_theme.user_message_bg(s)
+def _tool_pending_bg_fn(s: str) -> str: return _current_theme.tool_pending_bg(s)
+def _tool_success_bg_fn(s: str) -> str: return _current_theme.tool_success_bg(s)
+def _tool_error_bg_fn(s: str)   -> str: return _current_theme.tool_error_bg(s)
+
+# Text attributes — theme-independent ANSI attributes.
 def _bold(s: str)          -> str: return f"\x1b[1m{s}\x1b[22m"
 def _italic(s: str)        -> str: return f"\x1b[3m{s}\x1b[23m"
 def _underline(s: str)     -> str: return f"\x1b[4m{s}\x1b[24m"
 def _strikethrough(s: str) -> str: return f"\x1b[9m{s}\x1b[29m"
 def _inverse(s: str)       -> str: return f"\x1b[7m{s}\x1b[27m"
 
+
 # ---------------------------------------------------------------------------
-# Syntax highlighting — custom Pygments style matching dark.json syntax colors
+# Syntax highlighting — delegates to the active theme's Pygments formatter
 # ---------------------------------------------------------------------------
-
-class _PiDarkStyle(Style):
-    """VSCode Dark+-inspired syntax style matching dark.json syntaxXxx colors."""
-    background_color = "#1e1e24"
-    default_style = ""
-    styles = {
-        Token:                        "",
-        Comment:                      "#6A9955",   # syntaxComment
-        Comment.Single:               "#6A9955",
-        Comment.Multiline:            "#6A9955",
-        Keyword:                      "#569CD6",   # syntaxKeyword
-        Keyword.Declaration:          "#569CD6",
-        Keyword.Namespace:            "#569CD6",
-        Keyword.Type:                 "#4EC9B0",   # syntaxType
-        Name.Builtin:                 "#4EC9B0",   # syntaxType
-        Name.Class:                   "#4EC9B0",
-        Name.Function:                "#DCDCAA",   # syntaxFunction
-        Name.Function.Magic:          "#DCDCAA",
-        Name.Attribute:               "#9CDCFE",   # syntaxVariable
-        Name.Variable:                "#9CDCFE",
-        Name.Variable.Instance:       "#9CDCFE",
-        Name.Variable.Class:          "#9CDCFE",
-        Name.Variable.Global:         "#9CDCFE",
-        Name.Namespace:               "#4EC9B0",
-        String:                       "#CE9178",   # syntaxString
-        String.Doc:                   "#CE9178",
-        String.Interpol:              "#CE9178",
-        String.Escape:                "#D7BA7D",
-        Number:                       "#B5CEA8",   # syntaxNumber
-        Number.Integer:               "#B5CEA8",
-        Number.Float:                 "#B5CEA8",
-        Number.Hex:                   "#B5CEA8",
-        Operator:                     "#D4D4D4",   # syntaxOperator
-        Operator.Word:                "#569CD6",
-        Punctuation:                  "#D4D4D4",   # syntaxPunctuation
-        Error:                        "#cc6666",
-    }
-
-_pi_dark_formatter = TerminalTrueColorFormatter(style=_PiDarkStyle)
-
 
 def _highlight_code(code: str, lang: str | None) -> list[str]:
-    """Syntax-highlight *code* using the pi-tui dark theme colors.
+    """Syntax-highlight *code* using the active theme's syntax colors.
 
-    Mirrors highlightCode() in theme.js: skips auto-detection when no language
-    is given (unreliable), applies theme's mdCodeBlock color as fallback.
+    Skips auto-detection when no language is given (unreliable) and falls back
+    to the theme's ``success`` color as a plain text style.
     """
     from pygments import highlight as _pyg_highlight
     if not lang:
@@ -176,7 +118,7 @@ def _highlight_code(code: str, lang: str | None) -> list[str]:
         lexer = get_lexer_by_name(lang, stripall=True)
     except _PygClassNotFound:
         return [_success(line) for line in code.split("\n")]
-    highlighted = _pyg_highlight(code, lexer, _pi_dark_formatter)
+    highlighted = _pyg_highlight(code, lexer, _current_theme.syntax_formatter)
     if highlighted.endswith("\n"):
         highlighted = highlighted[:-1]
     return highlighted.split("\n")
@@ -196,16 +138,17 @@ def _strip_at_prefixes(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Themes — all colors from dark.json
+# UI theme objects — built with wrapper function references so that
+# _apply_theme() takes effect without rebuilding these objects.
 # ---------------------------------------------------------------------------
 
-# SelectList: accent for selected items, muted (#808080) for descriptions
+# SelectList: accent for selected items, muted for descriptions
 _select_list_theme = SLTheme(
-    selected_prefix=_accent,        # theme.fg("accent", …)  #8abeb7
-    selected_text=_accent,          # theme.fg("accent", …)  #8abeb7
-    description=_muted,             # theme.fg("muted", …)   #808080
-    scroll_info=_muted,             # theme.fg("muted", …)   #808080
-    no_match=_muted,                # theme.fg("muted", …)   #808080
+    selected_prefix=_accent,
+    selected_text=_accent,
+    description=_muted,
+    scroll_info=_muted,
+    no_match=_muted,
 )
 
 _editor_select_theme = SelectListTheme(
@@ -216,24 +159,24 @@ _editor_select_theme = SelectListTheme(
     no_match=_muted,
 )
 
-# Editor: borderMuted (#505050 dark gray)
+# Editor: borderMuted edge
 _editor_theme = EditorTheme(
-    border_color=_border_muted,     # theme.fg("borderMuted", …)  #505050
+    border_color=_border_muted,
     select_list=_editor_select_theme,
 )
 
-# Markdown: exact per-role colors from dark.json
+# Markdown
 _md_theme = MarkdownTheme(
-    heading=_heading,               # mdHeading  #f0c674
-    link=_link,                     # mdLink     #81a2be
-    link_url=_dim,                  # mdLinkUrl  #666666 (dimGray)
-    code=_accent,                   # mdCode     #8abeb7 (accent)
-    code_block=_success,            # mdCodeBlock #b5bd68 (green)
-    code_block_border=_muted,       # mdCodeBlockBorder #808080
-    quote=_muted,                   # mdQuote    #808080
-    quote_border=_muted,            # mdQuoteBorder #808080
-    hr=_muted,                      # mdHr       #808080
-    list_bullet=_accent,            # mdListBullet #8abeb7 (accent)
+    heading=_heading,
+    link=_link,
+    link_url=_dim,
+    code=_accent,
+    code_block=_success,
+    code_block_border=_muted,
+    quote=_muted,
+    quote_border=_muted,
+    hr=_muted,
+    list_bullet=_accent,
     bold=_bold,
     italic=_italic,
     strikethrough=_strikethrough,
@@ -241,26 +184,47 @@ _md_theme = MarkdownTheme(
     highlight_code=_highlight_code,
 )
 
-# SettingsList: accent for selected, muted for descriptions, dim for hints
-_settings_theme = SettingsListTheme(
-    label=lambda s, sel: _accent(s) if sel else s,
-    value=lambda s, sel: _accent(s) if sel else _muted(s),
-    description=_muted,
-    cursor=_accent("❯ "),
-    hint=_dim,
-)
+# SettingsList: ``cursor`` is a baked string so it is rebuilt by
+# _apply_theme() whenever the active theme changes.
+def _make_settings_theme() -> SettingsListTheme:
+    return SettingsListTheme(
+        label=lambda s, sel: _accent(s) if sel else s,
+        value=lambda s, sel: _accent(s) if sel else _muted(s),
+        description=_muted,
+        cursor=_accent("❯ "),
+        hint=_dim,
+    )
+
+
+_settings_theme: SettingsListTheme = _make_settings_theme()
+
+
+# ---------------------------------------------------------------------------
+# Theme application
+# ---------------------------------------------------------------------------
+
+
+def _apply_theme(name: str) -> None:
+    """Switch the active theme.  Safe to call at any time, including from an
+    async context.  The next TUI render will use the new colors."""
+    global _current_theme, _settings_theme
+    from pana.tui.theme import invalidate_cache
+    invalidate_cache(name)                          # ensure JSON is re-read
+    _current_theme = load_theme(name, use_cache=False)
+    _settings_theme = _make_settings_theme()
+
 
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
 
 COMMANDS: dict[str, str] = {
-    "login": "Authenticate with a provider",
-    "model": "Select a model",
-    "settings": "Configure thinking level, display options",
-    "new": "Start a new session",
-    "help": "Show available commands",
-    "quit": "Exit",
+    "login":    "Authenticate with a provider",
+    "model":    "Select a model",
+    "settings": "Configure thinking level, display options, and theme",
+    "new":      "Start a new session",
+    "help":     "Show available commands",
+    "quit":     "Exit",
 }
 
 _QUIT_ALIASES = ("quit", "exit", "q")
@@ -539,7 +503,7 @@ def _highlight_for_path(code: str, path: str) -> list[str]:
         lexer = get_lexer_for_filename(path, stripall=True)
     except _PygClassNotFound:
         return [_tool_output(line) for line in code.split("\n")]
-    highlighted = _pyg_highlight(code, lexer, _pi_dark_formatter)
+    highlighted = _pyg_highlight(code, lexer, _current_theme.syntax_formatter)
     if highlighted.endswith("\n"):
         highlighted = highlighted[:-1]
     return highlighted.split("\n")
@@ -1099,6 +1063,37 @@ class MiniApp:
             self._add_message(Spacer(1))
 
     async def _cmd_settings(self) -> None:
+        current_theme_name = state.get("theme", "dark")
+
+        def _theme_submenu(
+            current_value: str,
+            done: Callable[[str | None], None],
+        ) -> SelectList:
+            """Build a SelectList of all discoverable themes for the settings submenu."""
+            theme_paths = discover_themes()
+            sel_items = [
+                SelectItem(
+                    value=name,
+                    label=(
+                        f"{name}  {_dim('← active')}"
+                        if name == current_value
+                        else f"{name}  {_dim(str(theme_paths[name].parent))}"
+                    ),
+                )
+                for name in sorted(theme_paths)
+            ]
+            select = SelectList(sel_items, 8, _select_list_theme, searchable=True)
+
+            def on_select(item: SelectItem) -> None:
+                done(item.value)
+
+            def on_cancel() -> None:
+                done(None)
+
+            select.on_select = on_select
+            select.on_cancel = on_cancel
+            return select
+
         items = [
             SettingItem(
                 id="thinking_level",
@@ -1114,6 +1109,17 @@ class MiniApp:
                 description="Hide thinking blocks in assistant responses",
                 values=["false", "true"],
             ),
+            SettingItem(
+                id="theme",
+                label="Theme",
+                current_value=current_theme_name,
+                description=(
+                    "Color theme for the UI. "
+                    "Built-in: dark, light. "
+                    "Custom themes: ~/.pana/themes/*.json or .pana/themes/*.json"
+                ),
+                submenu=_theme_submenu,
+            ),
         ]
 
         done_event = asyncio.Event()
@@ -1127,6 +1133,13 @@ class MiniApp:
             elif setting_id == "hide_thinking_block":
                 self._hide_thinking_block = value == "true"
                 state.set("hide_thinking_block", self._hide_thinking_block)
+            elif setting_id == "theme":
+                try:
+                    _apply_theme(value)
+                    state.set("theme", value)
+                    self.tui.request_render(force=True)
+                except Exception as exc:
+                    logger.warning("Failed to apply theme '%s': %s", value, exc)
             self.tui.request_render()
 
         def on_cancel() -> None:
@@ -1142,6 +1155,13 @@ class MiniApp:
         await done_event.wait()
 
     async def run(self) -> None:
+        # Restore saved theme (must happen before any UI renders)
+        saved_theme = state.get("theme", "dark")
+        try:
+            _apply_theme(saved_theme)
+        except Exception:
+            pass  # missing/corrupt theme file — stay on dark
+
         # Restore saved model
         model_id = state.get("model")
         provider_name = state.get("provider")
