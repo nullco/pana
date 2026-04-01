@@ -15,9 +15,6 @@ from __future__ import annotations
 import os
 import re
 
-# =============================================================================
-# Global Kitty Protocol State
-# =============================================================================
 
 _kitty_protocol_active = False
 
@@ -31,9 +28,6 @@ def is_kitty_protocol_active() -> bool:
     return _kitty_protocol_active
 
 
-# =============================================================================
-# Key helper
-# =============================================================================
 
 
 class _Key:
@@ -117,9 +111,6 @@ class _Key:
 
 Key = _Key()
 
-# =============================================================================
-# Constants
-# =============================================================================
 
 SYMBOL_KEYS = set("`-=[]\\;',./!@#$%^&*()_+|~{}:<>?")
 
@@ -226,9 +217,6 @@ LEGACY_SEQUENCE_KEY_IDS: dict[str, str] = {
     "\x1bp": "alt+up", "\x1bn": "alt+down",
 }
 
-# =============================================================================
-# Platform helpers
-# =============================================================================
 
 
 def _is_windows_terminal_session() -> bool:
@@ -241,9 +229,6 @@ def _is_windows_terminal_session() -> bool:
     )
 
 
-# =============================================================================
-# Kitty Protocol Parsing
-# =============================================================================
 
 _CSI_U_RE = re.compile(
     r"^\x1b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u$"
@@ -360,9 +345,6 @@ def _matches_printable_modify_other(data: str, keycode: int, modifier: int) -> b
     return _matches_modify_other(data, keycode, modifier)
 
 
-# =============================================================================
-# Release / Repeat detection
-# =============================================================================
 
 
 def is_key_release(data: str) -> bool:
@@ -386,9 +368,6 @@ def is_key_repeat(data: str) -> bool:
     return False
 
 
-# =============================================================================
-# Backspace ambiguity helper
-# =============================================================================
 
 
 def _matches_raw_backspace(data: str, expected_modifier: int) -> bool:
@@ -406,9 +385,6 @@ def _matches_raw_backspace(data: str, expected_modifier: int) -> bool:
     return expected_modifier == 0
 
 
-# =============================================================================
-# Helpers
-# =============================================================================
 
 
 def _raw_ctrl_char(key: str) -> str | None:
@@ -487,9 +463,6 @@ def _format_parsed_key(cp: int, modifier: int, base_layout_key: int | None = Non
     return _format_key_with_mods(key_name, modifier)
 
 
-# =============================================================================
-# matches_key — main entry point
-# =============================================================================
 
 
 def matches_key(data: str, key_id: str) -> bool:
@@ -743,9 +716,6 @@ def matches_key(data: str, key_id: str) -> bool:
     return False
 
 
-# =============================================================================
-# parse_key
-# =============================================================================
 
 
 def parse_key(data: str) -> str | None:
@@ -846,9 +816,6 @@ def parse_key(data: str) -> str | None:
     return None
 
 
-# =============================================================================
-# decode_kitty_printable
-# =============================================================================
 
 _KITTY_PRINTABLE_ALLOWED = MODIFIERS["shift"] | LOCK_MASK
 

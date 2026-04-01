@@ -41,9 +41,6 @@ class AutocompleteProvider(Protocol):
     ) -> dict: ...
 
 
-# ---------------------------------------------------------------------------
-# Path helpers
-# ---------------------------------------------------------------------------
 
 
 def _find_last_delimiter(text: str) -> int:
@@ -132,9 +129,6 @@ def _walk_with_fd(
     return results
 
 
-# ---------------------------------------------------------------------------
-# CombinedAutocompleteProvider
-# ---------------------------------------------------------------------------
 
 
 class CombinedAutocompleteProvider:
@@ -148,7 +142,6 @@ class CombinedAutocompleteProvider:
         self._base_path = base_path or os.getcwd()
         self._fd_path = fd_path
 
-    # -- Public API --
 
     def get_suggestions(
         self, lines: list[str], cursor_line: int, cursor_col: int
@@ -282,7 +275,6 @@ class CombinedAutocompleteProvider:
         before = current_line[:cursor_col]
         return not (before.strip().startswith("/") and " " not in before.strip())
 
-    # -- Private helpers --
 
     def _extract_at_prefix(self, text: str) -> str | None:
         qp = _extract_quoted_prefix(text)

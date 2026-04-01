@@ -30,16 +30,8 @@ class _CancelledByEvent(BaseException):
     """
 
 
-# ---------------------------------------------------------------------------
-# Thinking levels — maps to openai_reasoning_effort in ModelSettings
-# ---------------------------------------------------------------------------
-
 THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh")
 
-
-# ---------------------------------------------------------------------------
-# Events emitted during streaming so the TUI can display tool activity
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -86,13 +78,8 @@ class ThinkingEvent:
     text: str
 
 
-# A stream handler receives these events
 StreamEvent = ToolCallEvent | ToolCallUpdateEvent | ToolResultEvent | TextEvent | ThinkingEvent
 
-
-# ---------------------------------------------------------------------------
-# Per-run mutable state — shared across node handlers within one agent.stream()
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -160,10 +147,6 @@ class Agent:
         self._system_prompt = build_system_prompt()
         self._agent = self._build_agent()
 
-    # ------------------------------------------------------------------
-    # Public streaming entry point
-    # ------------------------------------------------------------------
-
     async def stream(
         self,
         user_input: str,
@@ -205,20 +188,12 @@ class Agent:
                             node = await agent_run.next(node)
                 finally:
                     self._message_history = agent_run.all_messages()
-    # ------------------------------------------------------------------
-    # Auth helper
-    # ------------------------------------------------------------------
-
     async def _ensure_auth(self) -> None:
         """Re-authenticate if the provider token is close to expiry."""
         if self._model.provider.should_reauthenticate():
             await self._model.provider.reauthenticate()
             model = await self._model.provider.build_model(self._model.name)
             self.set_model(model)
-
-    # ------------------------------------------------------------------
-    # ModelRequestNode — stream text/thinking and detect tool calls early
-    # ------------------------------------------------------------------
 
     async def _stream_model_request_node(
         self,
@@ -330,7 +305,6 @@ class Agent:
         tid = part.tool_call_id or ""
 
         if part.tool_name and tid not in state.emitted_early_ids:
-            # First detection: record start time and fire the early event.
             state.emitted_early_ids.add(tid)
             if part.tool_call_id:
                 state.call_started[part.tool_call_id] = time.monotonic()
@@ -350,7 +324,6 @@ class Agent:
             and part.tool_name in state.stream_handlers
             and isinstance(part.args, str)
         ):
-            # Subsequent delta: try to extract a richer partial-args preview.
             partial = try_extract_partial_args(part.args)
             if partial and "path" in partial:
                 handler = state.stream_handlers[part.tool_name]
@@ -363,10 +336,6 @@ class Agent:
                         )
                     )
 
-    # ------------------------------------------------------------------
-    # CallToolsNode — finalise args display, execute tools, emit results
-    # ------------------------------------------------------------------
-
     async def _process_call_tools_node(
         self,
         node: CallToolsNode,
@@ -375,15 +344,11 @@ class Agent:
         event_handler: Callable[[StreamEvent], None],
     ):
         """Finalize tool call display, execute tools, then emit ToolResultEvents."""
-        # Emit final (complete) args for every tool call in this batch.
         for part in node.model_response.parts:
             if isinstance(part, ToolCallPart):
                 self._emit_final_tool_call(part, state, event_handler)
 
-        # Execute the tools (advances the graph).
         node = await agent_run.next(node)
-
-        # Emit results from the request message that was just appended.
         self._emit_tool_results(agent_run.all_messages(), state, event_handler)
 
         # Yield to the event loop so the TUI can render the result box
@@ -414,7 +379,6 @@ class Agent:
                 ToolCallEvent(tool_call_id=tid, tool_name=part.tool_name, args=full_args)
             )
         else:
-            # Update the existing box with the final, complete args.
             event_handler(
                 ToolCallUpdateEvent(tool_call_id=tid, tool_name=part.tool_name, args=full_args)
             )

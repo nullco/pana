@@ -295,7 +295,6 @@ class Editor:
         self._history_index = -1
         self._insert_text_internal(text)
 
-    # -- Rendering --
 
     def render(self, width: int) -> list[str]:
         max_pad = max(0, (width - 1) // 2)
@@ -422,7 +421,6 @@ class Editor:
                     })
         return layout
 
-    # -- Input handling --
 
     async def handle_input(self, data: str) -> None:
         kb = get_editor_keybindings()
@@ -646,7 +644,6 @@ class Editor:
         if data and ord(data[0]) >= 32:
             self._insert_char(data)
 
-    # -- Internal mutations --
 
     def _set_cursor_col(self, col: int) -> None:
         self._cursor_col = col
@@ -978,7 +975,6 @@ class Editor:
         self._insert_text_internal(text)
         self._last_action = "yank"
 
-    # -- Cursor movement --
 
     def _move_cursor(self, delta_line: int, delta_col: int) -> None:
         self._last_action = None
@@ -1085,7 +1081,6 @@ class Editor:
                 return
             li += step
 
-    # -- Visual line helpers --
 
     def _build_visual_line_map(self, width: int) -> list[dict]:
         vl: list[dict] = []
@@ -1216,7 +1211,6 @@ class Editor:
     def _is_in_slash_context(self, text: str) -> bool:
         return self._cursor_line == 0 and text.lstrip().startswith("/")
 
-    # -- Autocomplete --
 
     def _try_trigger_autocomplete(self) -> None:
         if not self._autocomplete_provider:

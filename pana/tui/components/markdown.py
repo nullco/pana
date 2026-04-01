@@ -126,7 +126,6 @@ class Markdown:
         self._cached_lines = result
         return result if result else [""]
 
-    # -- Default style --
 
     def _apply_default_style(self, text: str) -> str:
         if not self._default_style:
@@ -162,7 +161,6 @@ class Markdown:
         idx = styled.find(sentinel)
         return styled[:idx] if idx >= 0 else ""
 
-    # -- Token rendering --
 
     def _render_token(
         self,
@@ -355,7 +353,6 @@ class Markdown:
                 result += tok.get("raw", "") or tok.get("text", "")
         return result
 
-    # -- Lists --
 
     def _render_list(
         self,
@@ -429,7 +426,6 @@ class Markdown:
                         lines.append(apply_text(raw))
         return lines
 
-    # -- Tables --
 
     def _render_table(
         self,

@@ -8,10 +8,6 @@ from typing import Callable
 import grapheme
 import wcwidth
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 _WHITESPACE_RE = re.compile(r"\s")
 _PUNCTUATION_CATS = frozenset({"Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps", "Sc", "Sk", "Sm", "So"})
 
@@ -23,10 +19,6 @@ def is_whitespace_char(ch: str) -> bool:
 def is_punctuation_char(ch: str) -> bool:
     return unicodedata.category(ch) in _PUNCTUATION_CATS
 
-
-# ---------------------------------------------------------------------------
-# ANSI extraction
-# ---------------------------------------------------------------------------
 
 _CSI_RE = re.compile(r"\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]")
 _OSC_RE = re.compile(r"\x1b\].*?(?:\x1b\\|\x07)")
@@ -44,10 +36,6 @@ def extract_ansi_code(s: str, pos: int) -> tuple[str, int] | None:
             return (code, len(code))
     return None
 
-
-# ---------------------------------------------------------------------------
-# Grapheme width helpers
-# ---------------------------------------------------------------------------
 
 _VS16 = "\ufe0f"
 _REGIONAL_LO = 0x1F1E6
@@ -99,10 +87,6 @@ def _grapheme_width(g: str) -> int:
     return max(w, 0)
 
 
-# ---------------------------------------------------------------------------
-# visible_width
-# ---------------------------------------------------------------------------
-
 _PURE_ASCII_RE = re.compile(r"^[\x20-\x7e]*$")
 _ANSI_STRIP_RE = re.compile(r"\x1b(?:\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\].*?(?:\x1b\\|\x07)|_.*?(?:\x1b\\|\x07))")
 
@@ -123,10 +107,6 @@ def visible_width(s: str) -> int:
         width += _grapheme_width(g)
     return width
 
-
-# ---------------------------------------------------------------------------
-# AnsiCodeTracker
-# ---------------------------------------------------------------------------
 
 _SGR_RE = re.compile(r"^\x1b\[([\d;]*)m$")
 
@@ -261,11 +241,6 @@ class AnsiCodeTracker:
         return ""
 
 
-# ---------------------------------------------------------------------------
-# wrap_text_with_ansi
-# ---------------------------------------------------------------------------
-
-
 def _tokenize_with_ansi(text: str) -> list[str]:
     tokens: list[str] = []
     current = ""
@@ -390,11 +365,6 @@ def wrap_text_with_ansi(text: str, width: int) -> list[str]:
     return result
 
 
-# ---------------------------------------------------------------------------
-# apply_background_to_line
-# ---------------------------------------------------------------------------
-
-
 def apply_background_to_line(line: str, width: int, bg_fn: Callable[[str], str]) -> str:
     line_width = visible_width(line)
     padding = max(0, width - line_width)
@@ -410,11 +380,6 @@ def apply_background_to_line(line: str, width: int, bg_fn: Callable[[str], str])
         content = content.replace("\x1b[0m", "\x1b[0m" + bg_code)
 
     return bg_fn(content)
-
-
-# ---------------------------------------------------------------------------
-# truncate_to_width
-# ---------------------------------------------------------------------------
 
 
 def truncate_to_width(
@@ -458,11 +423,6 @@ def truncate_to_width(
     if pad:
         result += " " * (max_width - visible_width(result))
     return result
-
-
-# ---------------------------------------------------------------------------
-# slice_by_column / slice_with_width
-# ---------------------------------------------------------------------------
 
 
 def slice_with_width(
@@ -528,11 +488,6 @@ def slice_by_column(
 ) -> str:
     text, _ = slice_with_width(line, start_col, length, strict)
     return text
-
-
-# ---------------------------------------------------------------------------
-# extract_segments
-# ---------------------------------------------------------------------------
 
 
 def extract_segments(

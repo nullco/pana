@@ -48,10 +48,6 @@ def _strip_at_prefixes(text: str) -> str:
     return _AT_FILE_RE.sub(lambda m: m.group(1) or m.group(2), text)
 
 
-# ---------------------------------------------------------------------------
-# Module-level UI themes that stay within main.py
-# ---------------------------------------------------------------------------
-
 _editor_theme = EditorTheme(
     border_color=_theme.border_muted,
     select_list=ui_themes.editor_select_theme,
@@ -76,11 +72,6 @@ _md_theme = MarkdownTheme(
 )
 
 
-# ---------------------------------------------------------------------------
-# Chat bubble
-# ---------------------------------------------------------------------------
-
-
 class _UserMessage(Text):
     """User chat bubble with OSC 133 semantic zone markers."""
 
@@ -92,11 +83,6 @@ class _UserMessage(Text):
         lines[0] = _OSC133_ZONE_START + lines[0]
         lines[-1] = lines[-1] + _OSC133_ZONE_END + _OSC133_ZONE_FINAL
         return lines
-
-
-# ---------------------------------------------------------------------------
-# MiniApp
-# ---------------------------------------------------------------------------
 
 
 class MiniApp:
@@ -116,10 +102,6 @@ class MiniApp:
         self._stream_task: asyncio.Task | None = None
         self._draining: bool = False
         self._pending_messages: list[str] = []
-
-    # ------------------------------------------------------------------
-    # CommandContext implementation
-    # ------------------------------------------------------------------
 
     def add_message(self, component: object) -> None:
         """Append *component* to the chat area and request a re-render."""
@@ -178,10 +160,6 @@ class MiniApp:
         self.hide_thinking_block = value
         state.set("hide_thinking_block", value)
 
-    # ------------------------------------------------------------------
-    # Setup
-    # ------------------------------------------------------------------
-
     def _setup_ui(self) -> None:
         self._footer = Footer(dim_fn=_theme.dim)
 
@@ -220,10 +198,6 @@ class MiniApp:
 
         self.tui.set_focus(self._editor)
 
-    # ------------------------------------------------------------------
-    # Action handlers (keyboard shortcuts, not slash commands)
-    # ------------------------------------------------------------------
-
     def _on_action(self, action_id: str) -> None:
         if action_id == "app.thinking.cycle":
             self._cycle_thinking_level()
@@ -250,10 +224,6 @@ class MiniApp:
         self.add_message(Text(_theme.muted(f"Thinking blocks: {label}"), padding_x=1, padding_y=0))
         self.tui.request_render()
 
-    # ------------------------------------------------------------------
-    # Input handler
-    # ------------------------------------------------------------------
-
     async def _on_submit(self, text: str) -> None:
         text = text.strip()
         if not text:
@@ -262,7 +232,6 @@ class MiniApp:
         if self._editor:
             self._editor.add_to_history(text)
 
-        # Slash commands — delegate entirely to the registry.
         if text.startswith("/"):
             handled = await default_registry.dispatch(text, self)
             if not handled:
@@ -272,7 +241,6 @@ class MiniApp:
                 self.add_message(Spacer(1))
             return
 
-        # Chat message
         if not self.agent:
             self.add_message(
                 Text(_theme.error("❌ Please select a model first (/model)"), padding_x=1, padding_y=0)
@@ -295,10 +263,6 @@ class MiniApp:
         if self._pending_messages and self.agent:
             next_text = self._pending_messages.pop(0)
             self._stream_task = asyncio.create_task(self._stream_response(next_text))
-
-    # ------------------------------------------------------------------
-    # Streaming
-    # ------------------------------------------------------------------
 
     async def _stream_response(self, user_text: str) -> None:
         if not self.agent or self._awaiting_response:
@@ -484,10 +448,6 @@ class MiniApp:
             if not _propagating_cancel:
                 self._process_pending_messages()
 
-    # ------------------------------------------------------------------
-    # Run
-    # ------------------------------------------------------------------
-
     async def run(self) -> None:
         saved_theme = state.get("theme", "dark")
         try:
@@ -514,11 +474,6 @@ class MiniApp:
         finally:
             if not self.tui.stopped:
                 self.tui.stop()
-
-
-# ---------------------------------------------------------------------------
-# Entry points
-# ---------------------------------------------------------------------------
 
 
 async def main() -> None:

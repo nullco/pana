@@ -18,9 +18,6 @@ from pana.tui.utils import (
     visible_width,
 )
 
-# ---------------------------------------------------------------------------
-# Types
-# ---------------------------------------------------------------------------
 
 PROMPT = "> "
 PROMPT_WIDTH = visible_width(PROMPT)
@@ -34,9 +31,6 @@ class _UndoState(TypedDict):
     cursor: int
 
 
-# ---------------------------------------------------------------------------
-# Input component
-# ---------------------------------------------------------------------------
 
 
 class Input:
@@ -78,17 +72,11 @@ class Input:
         # Undo coalescing: track whether we're in a run of character inserts
         self._typing_run: bool = False
 
-    # ------------------------------------------------------------------
-    # Grapheme helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _graphemes(text: str) -> list[str]:
         return list(grapheme.graphemes(text))
 
-    # ------------------------------------------------------------------
-    # Undo helpers
-    # ------------------------------------------------------------------
 
     def _snapshot(self) -> _UndoState:
         return {"value": self.value, "cursor": self.cursor}
@@ -105,9 +93,6 @@ class Input:
     def _break_typing_run(self) -> None:
         self._typing_run = False
 
-    # ------------------------------------------------------------------
-    # Mutations
-    # ------------------------------------------------------------------
 
     def _insert_text(self, text: str) -> None:
         self.value = self.value[: self.cursor] + text + self.value[self.cursor :]
@@ -122,9 +107,6 @@ class Input:
             self.cursor = start
         return deleted
 
-    # ------------------------------------------------------------------
-    # Word boundary helpers
-    # ------------------------------------------------------------------
 
     def _word_left(self, pos: int) -> int:
         """Return position of the start of the word to the left of *pos*."""
@@ -170,9 +152,6 @@ class Input:
             i += 1
         return pos + len("".join(gs[:i]))
 
-    # ------------------------------------------------------------------
-    # Cursor movement
-    # ------------------------------------------------------------------
 
     def _move_left(self) -> None:
         if self.cursor <= 0:
@@ -200,9 +179,6 @@ class Input:
     def _move_line_end(self) -> None:
         self.cursor = len(self.value)
 
-    # ------------------------------------------------------------------
-    # Deletion actions
-    # ------------------------------------------------------------------
 
     def _delete_char_backward(self) -> None:
         if self.cursor <= 0:
@@ -257,9 +233,6 @@ class Input:
         accumulate = self._last_action in ("deleteToLineStart", "deleteToLineEnd")
         self._kill_ring.push(deleted, prepend=False, accumulate=accumulate)
 
-    # ------------------------------------------------------------------
-    # Kill ring
-    # ------------------------------------------------------------------
 
     def _yank(self) -> None:
         text = self._kill_ring.peek()
@@ -283,9 +256,6 @@ class Input:
             self._delete_range(start, self.cursor)
             self._insert_text(curr)
 
-    # ------------------------------------------------------------------
-    # Input handling
-    # ------------------------------------------------------------------
 
     async def handle_input(self, data: str) -> None:
         """Process a chunk of terminal input data."""
@@ -448,9 +418,6 @@ class Input:
         self._insert_text(ch)
         self._last_action = "type"
 
-    # ------------------------------------------------------------------
-    # Rendering
-    # ------------------------------------------------------------------
 
     def render(self, width: int) -> list[str]:
         """Render the input as a single line of *width* columns.
@@ -531,9 +498,6 @@ class Input:
         rest = "".join(gs[1:])
         return (char, rest)
 
-    # ------------------------------------------------------------------
-    # Public helpers
-    # ------------------------------------------------------------------
 
     def get_value(self) -> str:
         return self.value

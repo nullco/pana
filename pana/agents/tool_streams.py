@@ -63,11 +63,6 @@ def build_stream_handlers() -> dict[str, ToolStreamHandler]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Partial-JSON parser for streaming tool args
-# ---------------------------------------------------------------------------
-
-
 def try_extract_partial_args(args_str: str) -> dict[str, str] | None:
     """Best-effort extraction of tool args from a partial (still-streaming) JSON string.
 

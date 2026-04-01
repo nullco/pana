@@ -11,10 +11,6 @@ from pana.tui.components.editor import SelectListTheme as EditorSelectListTheme
 from pana.tui.components.select_list import SelectListTheme as SLTheme
 from pana.tui.components.settings_list import SettingsListTheme
 
-# ---------------------------------------------------------------------------
-# SelectList theme  (used by /login, /model, and the theme sub-menu in /settings)
-# ---------------------------------------------------------------------------
-
 select_list_theme = SLTheme(
     selected_prefix=_theme.accent,
     selected_text=_theme.accent,
@@ -31,10 +27,6 @@ editor_select_theme = EditorSelectListTheme(
     scroll_info=_theme.muted,
     no_match=_theme.muted,
 )
-
-# ---------------------------------------------------------------------------
-# SettingsList theme  (used by /settings)
-# ---------------------------------------------------------------------------
 
 _settings_theme: SettingsListTheme | None = None
 
@@ -55,11 +47,6 @@ def get_settings_theme() -> SettingsListTheme:
     if _settings_theme is None:
         _settings_theme = _make_settings_theme()
     return _settings_theme
-
-
-# ---------------------------------------------------------------------------
-# Theme switching
-# ---------------------------------------------------------------------------
 
 
 def apply_theme(name: str) -> None:

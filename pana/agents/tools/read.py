@@ -30,7 +30,6 @@ def tool_read(path: str, offset: int | None = None, limit: int | None = None) ->
     if not resolved.is_file():
         return f"Error: not a file: {path}"
 
-    # Image files — return a notice (no base64 in this implementation)
     if resolved.suffix.lower() in IMAGE_EXTENSIONS:
         return f"[Image file: {resolved.name} ({resolved.stat().st_size} bytes)]"
 
@@ -49,7 +48,6 @@ def tool_read(path: str, offset: int | None = None, limit: int | None = None) ->
     if start >= total_file_lines:
         return f"Error: offset {offset} is beyond end of file ({total_file_lines} lines total)"
 
-    # Apply user-specified limit if given
     user_limited_lines: int | None = None
     if limit is not None:
         end = min(start + limit, total_file_lines)
@@ -58,7 +56,6 @@ def tool_read(path: str, offset: int | None = None, limit: int | None = None) ->
     else:
         selected = "\n".join(all_lines[start:])
 
-    # Apply head truncation (line + byte limits)
     trunc = truncate_head(selected)
 
     if trunc["first_line_exceeds_limit"]:

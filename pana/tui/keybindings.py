@@ -14,9 +14,6 @@ from typing import Any
 
 from pana.tui.keys import matches_key
 
-# ---------------------------------------------------------------------------
-# Canonical keybinding definitions
-# ---------------------------------------------------------------------------
 
 TUI_KEYBINDINGS: dict[str, dict[str, Any]] = {
     # Editor — cursor movement
@@ -62,9 +59,6 @@ TUI_KEYBINDINGS: dict[str, dict[str, Any]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _normalize_keys(keys: str | list[str] | None) -> list[str]:
@@ -80,9 +74,6 @@ def _normalize_keys(keys: str | list[str] | None) -> list[str]:
     return result
 
 
-# ---------------------------------------------------------------------------
-# KeybindingConflict
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -91,9 +82,6 @@ class KeybindingConflict:
     keybindings: list[str]
 
 
-# ---------------------------------------------------------------------------
-# KeybindingsManager
-# ---------------------------------------------------------------------------
 
 
 class KeybindingsManager:
@@ -139,9 +127,6 @@ class KeybindingsManager:
             else:
                 self._keys_by_id[id_] = _normalize_keys(definition.get("defaultKeys"))
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def matches(self, data: str, keybinding: str) -> bool:
         """Return True if *data* matches any key bound to *keybinding*."""
@@ -178,9 +163,6 @@ class KeybindingsManager:
         return resolved
 
 
-# ---------------------------------------------------------------------------
-# Global singleton
-# ---------------------------------------------------------------------------
 
 _global_keybindings: KeybindingsManager | None = None
 
@@ -197,9 +179,6 @@ def get_keybindings() -> KeybindingsManager:
     return _global_keybindings
 
 
-# ---------------------------------------------------------------------------
-# Back-compat alias used by editor.py
-# ---------------------------------------------------------------------------
 
 # Keep old names pointing at the same singleton so existing callers work.
 get_editor_keybindings = get_keybindings

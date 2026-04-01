@@ -9,9 +9,6 @@ import struct
 from dataclasses import dataclass
 from typing import Literal
 
-# ---------------------------------------------------------------------------
-# Types
-# ---------------------------------------------------------------------------
 
 ImageProtocol = Literal["kitty", "iterm2"] | None
 
@@ -50,9 +47,6 @@ class ImageRenderResult:
     image_id: int | None = None
 
 
-# ---------------------------------------------------------------------------
-# Module-level state
-# ---------------------------------------------------------------------------
 
 _cached_capabilities: TerminalCapabilities | None = None
 _cell_dimensions = CellDimensions(width_px=9, height_px=18)
@@ -67,9 +61,6 @@ def set_cell_dimensions(dims: CellDimensions) -> None:
     _cell_dimensions = dims
 
 
-# ---------------------------------------------------------------------------
-# Capability detection
-# ---------------------------------------------------------------------------
 
 def detect_capabilities() -> TerminalCapabilities:
     term_program = os.environ.get("TERM_PROGRAM", "").lower()
@@ -110,9 +101,6 @@ def reset_capabilities_cache() -> None:
     _cached_capabilities = None
 
 
-# ---------------------------------------------------------------------------
-# Image line detection
-# ---------------------------------------------------------------------------
 
 _KITTY_PREFIX = "\x1b_G"
 _ITERM2_PREFIX = "\x1b]1337;File="
@@ -127,18 +115,12 @@ def is_image_line(line: str) -> bool:
     return _KITTY_PREFIX in line or _ITERM2_PREFIX in line
 
 
-# ---------------------------------------------------------------------------
-# Image ID allocation
-# ---------------------------------------------------------------------------
 
 def allocate_image_id() -> int:
     """Generate a random image ID for Kitty graphics protocol."""
     return random.randint(1, 0xFFFFFFFF)
 
 
-# ---------------------------------------------------------------------------
-# Kitty graphics protocol
-# ---------------------------------------------------------------------------
 
 _CHUNK_SIZE = 4096
 
@@ -193,9 +175,6 @@ def delete_all_kitty_images() -> str:
     return "\x1b_Ga=d,d=A\x1b\\"
 
 
-# ---------------------------------------------------------------------------
-# iTerm2 protocol
-# ---------------------------------------------------------------------------
 
 def encode_iterm2(
     base64_data: str,
@@ -222,9 +201,6 @@ def encode_iterm2(
     return f"\x1b]1337;File={';'.join(params)}:{base64_data}\x07"
 
 
-# ---------------------------------------------------------------------------
-# Row calculation
-# ---------------------------------------------------------------------------
 
 def calculate_image_rows(
     image_dims: ImageDimensions,
@@ -242,9 +218,6 @@ def calculate_image_rows(
     return max(1, rows)
 
 
-# ---------------------------------------------------------------------------
-# Image dimension parsing
-# ---------------------------------------------------------------------------
 
 def get_png_dimensions(base64_data: str) -> ImageDimensions | None:
     """Extract dimensions from a base64-encoded PNG."""
@@ -358,9 +331,6 @@ def get_image_dimensions(base64_data: str, mime_type: str) -> ImageDimensions | 
     return None
 
 
-# ---------------------------------------------------------------------------
-# High-level rendering
-# ---------------------------------------------------------------------------
 
 def render_image(
     base64_data: str,

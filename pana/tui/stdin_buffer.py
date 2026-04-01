@@ -11,18 +11,9 @@ from __future__ import annotations
 import asyncio
 from typing import Callable
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 ESC = "\x1b"
 BRACKETED_PASTE_START = "\x1b[200~"
 BRACKETED_PASTE_END = "\x1b[201~"
-
-# ---------------------------------------------------------------------------
-# Sequence completeness checkers
-# ---------------------------------------------------------------------------
-
 
 def _is_complete_csi_sequence(data: str) -> str:
     """Check if a CSI (ESC [) sequence is complete."""
@@ -146,11 +137,6 @@ def extract_complete_sequences(buffer: str) -> tuple[list[str], str]:
     return sequences, ""
 
 
-# ---------------------------------------------------------------------------
-# StdinBuffer
-# ---------------------------------------------------------------------------
-
-
 class StdinBuffer:
     """Accumulates raw stdin data and emits only complete escape sequences.
 
@@ -260,10 +246,6 @@ class StdinBuffer:
 
     def get_buffer(self) -> str:
         return self._buffer
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _schedule_flush_timeout(self) -> None:
         """Schedule a timeout that flushes the remainder and emits each sequence.

@@ -31,19 +31,11 @@ class CommandRegistry:
         # Maps every name/alias → Command instance.
         self._by_name: dict[str, Command] = {}
 
-    # ------------------------------------------------------------------
-    # Registration
-    # ------------------------------------------------------------------
-
     def register(self, command: Command) -> None:
         """Register *command* under its name and all aliases."""
         self._by_name[command.name] = command
         for alias in command.aliases:
             self._by_name[alias] = command
-
-    # ------------------------------------------------------------------
-    # Resolution
-    # ------------------------------------------------------------------
 
     def resolve(self, name: str) -> Command | None:
         """Return the command whose name (or alias) matches *name*.
@@ -64,10 +56,6 @@ class CommandRegistry:
                 matched[cmd.name] = cmd
 
         return next(iter(matched.values())) if len(matched) == 1 else None
-
-    # ------------------------------------------------------------------
-    # Dispatch
-    # ------------------------------------------------------------------
 
     async def dispatch(self, text: str, ctx: CommandContext) -> bool:
         """Parse *text* as a slash command and execute it.
@@ -90,10 +78,6 @@ class CommandRegistry:
         logger.debug("Dispatching command /%s with args=%r", cmd_name, args)
         await command.execute(ctx, args)
         return True
-
-    # ------------------------------------------------------------------
-    # Introspection
-    # ------------------------------------------------------------------
 
     def all_commands(self) -> list[Command]:
         """Return a deduplicated list of every registered :class:`Command`."""

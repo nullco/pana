@@ -7,10 +7,6 @@ from __future__ import annotations
 
 from pana.tui.theme import PanaTheme, load_theme
 
-# ---------------------------------------------------------------------------
-# Active theme — module-level singleton, swapped by apply_theme()
-# ---------------------------------------------------------------------------
-
 _current_theme: PanaTheme = load_theme("dark")
 
 
@@ -25,10 +21,6 @@ def apply_theme(name: str) -> None:
 def get_current_theme() -> PanaTheme:
     return _current_theme
 
-
-# ---------------------------------------------------------------------------
-# Color wrappers — delegate to _current_theme
-# ---------------------------------------------------------------------------
 
 def accent(s: str)        -> str: return _current_theme.accent(s)
 def border_muted(s: str)  -> str: return _current_theme.border_muted(s)
@@ -57,10 +49,6 @@ def underline(s: str)     -> str: return f"\x1b[4m{s}\x1b[24m"
 def strikethrough(s: str) -> str: return f"\x1b[9m{s}\x1b[29m"
 def inverse(s: str)       -> str: return f"\x1b[7m{s}\x1b[27m"
 
-
-# ---------------------------------------------------------------------------
-# Syntax highlighting
-# ---------------------------------------------------------------------------
 
 def highlight_code(code: str, lang: str | None) -> list[str]:
     """Syntax-highlight *code* by language name."""

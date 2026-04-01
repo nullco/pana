@@ -55,6 +55,5 @@ def format_result(
     return get_renderer(tool_name).format_result(args, result, elapsed_s, is_error)
 
 
-# ── built-in registrations ────────────────────────────────────────────────────
 for _r in [BashRenderer(), ReadRenderer(), EditRenderer(), WriteRenderer()]:
     register(_r)

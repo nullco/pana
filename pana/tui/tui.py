@@ -27,16 +27,10 @@ from pana.tui.utils import extract_segments, slice_by_column, slice_with_width, 
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 
 CURSOR_MARKER = "\x1b_pi:c\x07"  # APC zero-width cursor position marker
 _SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07"
 
-# ---------------------------------------------------------------------------
-# Component / Focusable protocols
-# ---------------------------------------------------------------------------
 
 
 @runtime_checkable
@@ -53,9 +47,6 @@ def is_focusable(component: object) -> bool:
     return isinstance(component, Focusable)
 
 
-# ---------------------------------------------------------------------------
-# Container
-# ---------------------------------------------------------------------------
 
 
 class Container:
@@ -88,9 +79,6 @@ class Container:
         return lines
 
 
-# ---------------------------------------------------------------------------
-# Overlay types
-# ---------------------------------------------------------------------------
 
 OverlayAnchor = str  # "center", "top-left", "top-right", "bottom-left", ...
 SizeValue = int | str  # int or e.g. "50%"
@@ -120,9 +108,6 @@ class OverlayOptions:
     non_capturing: bool = False
 
 
-# ---------------------------------------------------------------------------
-# OverlayHandle — returned by TUI.show_overlay()
-# ---------------------------------------------------------------------------
 
 
 class OverlayHandle:
@@ -150,8 +135,6 @@ class OverlayHandle:
         self._hidden = False
         self.focus_order = focus_order
 
-    # -- visibility ----------------------------------------------------------
-
     def hide(self) -> None:
         """Remove this overlay from the stack and restore focus."""
         self._tui.hide_overlay(self)
@@ -177,8 +160,6 @@ class OverlayHandle:
 
     def is_hidden(self) -> bool:
         return self._hidden
-
-    # -- focus ---------------------------------------------------------------
 
     def focus(self) -> None:
         entry = self._tui._get_entry_for_handle(self)
@@ -208,9 +189,6 @@ class OverlayHandle:
         return self._tui.focused_component is self.component
 
 
-# ---------------------------------------------------------------------------
-# Overlay entry (internal)
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -221,9 +199,6 @@ class _OverlayEntry:
     previous_focus: Component | None = None
 
 
-# ---------------------------------------------------------------------------
-# Resolved overlay layout
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -234,9 +209,6 @@ class _OverlayLayout:
     max_height: int | None
 
 
-# ---------------------------------------------------------------------------
-# TUI
-# ---------------------------------------------------------------------------
 
 
 class TUI(Container):
@@ -289,9 +261,6 @@ class TUI(Container):
 
         self.stopped: bool = False
 
-    # ------------------------------------------------------------------
-    # Back-compat properties (old names → new private names)
-    # ------------------------------------------------------------------
 
     @property
     def previous_lines(self) -> list[str]:
@@ -325,9 +294,6 @@ class TUI(Container):
     def full_redraws(self) -> int:
         return self._full_redraw_count
 
-    # ------------------------------------------------------------------
-    # Configuration setters
-    # ------------------------------------------------------------------
 
     def get_show_hardware_cursor(self) -> bool:
         return self.show_hardware_cursor
@@ -346,9 +312,6 @@ class TUI(Container):
     def set_clear_on_shrink(self, enabled: bool) -> None:
         self.clear_on_shrink = enabled
 
-    # ------------------------------------------------------------------
-    # Focus management
-    # ------------------------------------------------------------------
 
     def set_focus(self, component: Component | None) -> None:
         if self.focused_component is not None and is_focusable(self.focused_component):
@@ -357,9 +320,6 @@ class TUI(Container):
         if component is not None and is_focusable(component):
             component.focused = True
 
-    # ------------------------------------------------------------------
-    # Input listeners
-    # ------------------------------------------------------------------
 
     def add_input_listener(
         self, listener: Callable[[str], dict | None]
@@ -387,9 +347,6 @@ class TUI(Container):
         except ValueError:
             pass
 
-    # ------------------------------------------------------------------
-    # Overlay system
-    # ------------------------------------------------------------------
 
     def _next_focus_order(self) -> int:
         self._focus_order_counter += 1
@@ -483,9 +440,6 @@ class TUI(Container):
     def has_overlay(self) -> bool:
         return any(self._is_overlay_visible(e) for e in self._overlay_stack)
 
-    # ------------------------------------------------------------------
-    # Cell-size query (for image rendering accuracy)
-    # ------------------------------------------------------------------
 
     def query_cell_size(self) -> None:
         """Send CSI 16 t to query cell dimensions in pixels.
@@ -528,9 +482,6 @@ class TUI(Container):
         self._cell_size_query_pending = False
         return result
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     def invalidate(self) -> None:
         super().invalidate()
@@ -567,9 +518,6 @@ class TUI(Container):
         self.terminal.show_cursor()
         self.terminal.stop()
 
-    # ------------------------------------------------------------------
-    # Render scheduling
-    # ------------------------------------------------------------------
 
     def request_render(self, force: bool = False) -> None:
         if self.stopped:
@@ -591,9 +539,6 @@ class TUI(Container):
         except RuntimeError:
             self._do_render()
 
-    # ------------------------------------------------------------------
-    # Input handling
-    # ------------------------------------------------------------------
 
     async def _handle_input(self, data: str) -> None:
         if self.stopped:
@@ -660,9 +605,6 @@ class TUI(Container):
     def _handle_resize(self) -> None:
         self.request_render()
 
-    # ------------------------------------------------------------------
-    # Debug helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _is_termux_session() -> bool:
@@ -702,9 +644,6 @@ class TUI(Container):
         except OSError:
             pass
 
-    # ------------------------------------------------------------------
-    # Core render
-    # ------------------------------------------------------------------
 
     def _do_render(self) -> None:
         self._render_requested = False
@@ -943,9 +882,6 @@ class TUI(Container):
         self._previous_width = width
         self._previous_height = height
 
-    # ------------------------------------------------------------------
-    # Line-reset application
-    # ------------------------------------------------------------------
 
     def _apply_line_resets(self, lines: list[str]) -> list[str]:
         reset = _SEGMENT_RESET
@@ -954,9 +890,6 @@ class TUI(Container):
                 lines[i] = line + reset
         return lines
 
-    # ------------------------------------------------------------------
-    # Overlay compositing
-    # ------------------------------------------------------------------
 
     def _resolve_size_value(self, value: SizeValue | None, reference: int) -> int | None:
         if value is None:
@@ -1167,9 +1100,6 @@ class TUI(Container):
 
         return result
 
-    # ------------------------------------------------------------------
-    # Cursor extraction
-    # ------------------------------------------------------------------
 
     def _extract_cursor_position(
         self,
@@ -1188,9 +1118,6 @@ class TUI(Container):
             return (row_idx, col)
         return None
 
-    # ------------------------------------------------------------------
-    # Hardware cursor positioning
-    # ------------------------------------------------------------------
 
     def _position_hardware_cursor(
         self,

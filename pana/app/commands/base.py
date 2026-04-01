@@ -29,8 +29,6 @@ class CommandContext(Protocol):
     ``CommandContext`` so it stays decoupled from the concrete app class.
     """
 
-    # Read-only state ---------------------------------------------------------
-
     @property
     def agent(self) -> Agent | None:
         """The currently active LLM agent, or ``None`` if none is selected."""
@@ -40,8 +38,6 @@ class CommandContext(Protocol):
     def hide_thinking_block(self) -> bool:
         """Whether thinking blocks are hidden in the chat view."""
         ...
-
-    # UI helpers --------------------------------------------------------------
 
     def add_message(self, component: Any) -> None:
         """Append *component* to the chat scroll area and re-render."""
@@ -72,8 +68,6 @@ class CommandContext(Protocol):
     def request_render(self) -> None:
         """Ask the TUI for an immediate re-render."""
         ...
-
-    # State mutators ----------------------------------------------------------
 
     def set_agent(self, agent: Agent) -> None:
         """Replace the active agent with *agent*."""

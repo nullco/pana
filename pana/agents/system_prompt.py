@@ -18,10 +18,6 @@ from pana.agents.context import collect_agents_md
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Tool one-liners (mirrors pi's toolSnippets)
-# ---------------------------------------------------------------------------
-
 TOOL_SNIPPETS: dict[str, str] = {
     "read": (
         "Read the contents of a file. Supports text files. "
@@ -44,12 +40,7 @@ TOOL_SNIPPETS: dict[str, str] = {
     ),
 }
 
-# Default tool order
 DEFAULT_TOOLS: list[str] = ["read", "bash", "edit", "write"]
-
-# ---------------------------------------------------------------------------
-# Guidelines (mirrors pi's logic)
-# ---------------------------------------------------------------------------
 
 BASE_GUIDELINES: list[str] = [
     "Use bash for file operations like ls, rg, find",
@@ -59,11 +50,6 @@ BASE_GUIDELINES: list[str] = [
     "Be concise in your responses",
     "Show file paths clearly when working with files",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Public builder
-# ---------------------------------------------------------------------------
 
 
 def build_system_prompt(
@@ -87,7 +73,6 @@ def build_system_prompt(
     today = date.today().isoformat()
     active_tools = tools or DEFAULT_TOOLS
 
-    # --- Tools section ---
     tools_lines = [
         f"- {name}: {TOOL_SNIPPETS[name]}"
         for name in active_tools
@@ -95,7 +80,6 @@ def build_system_prompt(
     ]
     tools_block = "\n".join(tools_lines) if tools_lines else "(none)"
 
-    # --- Guidelines section ---
     guidelines: list[str] = list(BASE_GUIDELINES)
     for g in extra_guidelines or []:
         g = g.strip()
@@ -103,7 +87,6 @@ def build_system_prompt(
             guidelines.append(g)
     guidelines_block = "\n".join(f"- {g}" for g in guidelines)
 
-    # --- Core prompt ---
     prompt = (
         "You are an expert coding assistant operating inside pana, a coding agent. "
         "You help users by reading files, executing commands, editing code, and writing new files.\n"
@@ -113,16 +96,13 @@ def build_system_prompt(
         f"Guidelines:\n{guidelines_block}"
     )
 
-    # --- Optional append ---
     if append_prompt:
         prompt += f"\n\n{append_prompt.strip()}"
 
-    # --- Project context (AGENTS.md) ---
     project_context = collect_agents_md()
     if project_context:
         prompt += f"\n\n{project_context}"
 
-    # --- Date and CWD (always last, like pi) ---
     prompt += f"\nCurrent date: {today}"
     prompt += f"\nCurrent working directory: {resolved_cwd}"
 

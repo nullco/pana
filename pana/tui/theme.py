@@ -50,15 +50,7 @@ from pygments.token import (
     Token,
 )
 
-# ---------------------------------------------------------------------------
-# Type alias
-# ---------------------------------------------------------------------------
-
 ColorFn = Callable[[str], str]
-
-# ---------------------------------------------------------------------------
-# Low-level color helpers
-# ---------------------------------------------------------------------------
 
 _HEX_RE = re.compile(r"^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$")
 
@@ -137,10 +129,6 @@ def _color_to_hex(rgb: tuple[int, int, int]) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-# ---------------------------------------------------------------------------
-# PanaTheme dataclass
-# ---------------------------------------------------------------------------
-
 @dataclass
 class PanaTheme:
     """Resolved theme: every field is a ready-to-call ANSI color function.
@@ -153,7 +141,6 @@ class PanaTheme:
 
     name: str
 
-    # -- Core foreground colors ----------------------------------------------
     accent: ColorFn
     border_muted: ColorFn
     muted: ColorFn
@@ -162,7 +149,6 @@ class PanaTheme:
     error: ColorFn
     warning: ColorFn
 
-    # -- Markdown ------------------------------------------------------------
     md_heading: ColorFn
     md_link: ColorFn
     md_link_url: ColorFn
@@ -174,26 +160,19 @@ class PanaTheme:
     md_hr: ColorFn
     md_list_bullet: ColorFn
 
-    # -- Tool output ---------------------------------------------------------
     tool_output: ColorFn
     tool_diff_added: ColorFn
     tool_diff_removed: ColorFn
     tool_diff_context: ColorFn
     thinking_text: ColorFn
 
-    # -- Background colors ---------------------------------------------------
     user_message_bg: ColorFn
     tool_pending_bg: ColorFn
     tool_success_bg: ColorFn
     tool_error_bg: ColorFn
 
-    # -- Syntax highlighting -------------------------------------------------
     syntax_formatter: TerminalTrueColorFormatter
 
-
-# ---------------------------------------------------------------------------
-# Pygments style builder
-# ---------------------------------------------------------------------------
 
 def _make_syntax_formatter(
     syntax: dict[str, str],
@@ -256,10 +235,6 @@ def _make_syntax_formatter(
     )
     return TerminalTrueColorFormatter(style=style_cls)
 
-
-# ---------------------------------------------------------------------------
-# Theme file parser
-# ---------------------------------------------------------------------------
 
 #: All color token keys that a theme JSON file must supply.
 REQUIRED_COLOR_KEYS: tuple[str, ...] = (
@@ -346,10 +321,6 @@ def load_theme_file(path: Path) -> PanaTheme:
     )
 
 
-# ---------------------------------------------------------------------------
-# Theme discovery
-# ---------------------------------------------------------------------------
-
 def _builtin_themes_dir() -> Path:
     # pana/tui/theme.py → pana/ → themes/
     return Path(__file__).parent.parent / "themes"
@@ -383,10 +354,6 @@ def discover_themes() -> dict[str, Path]:
 
     return found
 
-
-# ---------------------------------------------------------------------------
-# Loader with cache
-# ---------------------------------------------------------------------------
 
 _cache: dict[str, PanaTheme] = {}
 
