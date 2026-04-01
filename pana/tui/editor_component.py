@@ -5,6 +5,7 @@ drop-in replacements for the built-in Editor.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from typing import TYPE_CHECKING, Callable, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -28,9 +29,9 @@ class EditorComponent(Protocol):
 
     def set_text(self, text: str) -> None: ...
 
-    def handle_input(self, data: str) -> None: ...
+    async def handle_input(self, data: str) -> None: ...
 
-    on_submit: Callable[[str], None] | None
+    on_submit: Callable[[str], Awaitable[None]] | None
     on_change: Callable[[str], None] | None
 
     def add_to_history(self, text: str) -> None: ...

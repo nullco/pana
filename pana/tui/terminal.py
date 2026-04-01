@@ -16,7 +16,7 @@ import signal
 import sys
 import termios
 import tty
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from pana.tui.keys import set_kitty_protocol_active
@@ -26,7 +26,9 @@ from pana.tui.stdin_buffer import StdinBuffer
 class Terminal(Protocol):
     """Minimal terminal I/O interface."""
 
-    def start(self, on_input: Callable[[str], None], on_resize: Callable[[], None]) -> None: ...
+    def start(self, on_resize: Callable[[], None]) -> None: ...
+
+    async def run(self, on_input: Callable[[str], Awaitable[None]]) -> None: ...
 
     def stop(self) -> None: ...
 
@@ -68,8 +70,9 @@ class ProcessTerminal:
     def __init__(self) -> None:
         self._original_attrs: list[int | list[bytes | int]] | None = None
         self._original_flags: int | None = None
-        self._on_input: Callable[[str], None] | None = None
+        self._on_input: Callable[[str], None] | None = None  # points to queue.put_nowait; set None during drain
         self._on_resize: Callable[[], None] | None = None
+        self._input_queue: asyncio.Queue[str | None] = asyncio.Queue()
         self._prev_sigwinch: signal.Handlers | None = None
         self._stdin_fd: int | None = None
         self._kitty_protocol_active: bool = False
@@ -86,8 +89,7 @@ class ProcessTerminal:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def start(self, on_input: Callable[[str], None], on_resize: Callable[[], None]) -> None:
-        self._on_input = on_input
+    def start(self, on_resize: Callable[[], None]) -> None:
         self._on_resize = on_resize
 
         if not sys.stdin.isatty():
@@ -113,6 +115,9 @@ class ProcessTerminal:
         # Stdin buffer with Kitty protocol negotiation
         self._setup_stdin_buffer()
         self._query_and_enable_kitty_protocol()
+
+        # Route all stdin through the queue
+        self._on_input = self._input_queue.put_nowait
 
         # Async stdin reader
         loop = asyncio.get_running_loop()
@@ -152,6 +157,9 @@ class ProcessTerminal:
             except RuntimeError:
                 pass
 
+            # Signal run() to exit
+            self._input_queue.put_nowait(None)
+
             # Restore terminal attributes
             if self._original_attrs is not None:
                 termios.tcsetattr(fd, termios.TCSAFLUSH, self._original_attrs)
@@ -171,6 +179,21 @@ class ProcessTerminal:
 
         self._on_input = None
         self._on_resize = None
+
+    # ------------------------------------------------------------------
+    # Async input loop
+    # ------------------------------------------------------------------
+
+    async def run(self, on_input: Callable[[str], Awaitable[None]]) -> None:
+        """Read keystrokes from the queue and dispatch them asynchronously.
+
+        Returns when stop() is called (which enqueues a None sentinel).
+        """
+        while True:
+            data = await self._input_queue.get()
+            if data is None:
+                break
+            await on_input(data)
 
     # ------------------------------------------------------------------
     # Output

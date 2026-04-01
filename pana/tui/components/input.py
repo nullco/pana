@@ -1,7 +1,7 @@
 """Single-line text input component with horizontal scrolling, kill ring, and undo."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TypedDict
 
 import grapheme
@@ -55,7 +55,7 @@ class Input:
     def __init__(
         self,
         *,
-        on_submit: Callable[[str], None] | None = None,
+        on_submit: Callable[[str], Awaitable[None]] | None = None,
         on_escape: Callable[[], None] | None = None,
         initial_value: str = "",
     ) -> None:
@@ -287,7 +287,7 @@ class Input:
     # Input handling
     # ------------------------------------------------------------------
 
-    def handle_input(self, data: str) -> None:
+    async def handle_input(self, data: str) -> None:
         """Process a chunk of terminal input data."""
         # --- Bracketed paste handling ---
         if self._paste_buffer is not None:
@@ -305,12 +305,12 @@ class Input:
                 self._last_action = "paste"
             remainder = data[end_idx + len(_PASTE_END) :]
             if remainder:
-                self.handle_input(remainder)
+                await self.handle_input(remainder)
             return
 
         if data.startswith(_PASTE_START):
             self._paste_buffer = ""
-            self.handle_input(data[len(_PASTE_START) :])
+            await self.handle_input(data[len(_PASTE_START) :])
             return
 
         kb = get_editor_keybindings()
@@ -333,7 +333,7 @@ class Input:
             self._break_typing_run()
             self._last_action = "submit"
             if self.on_submit:
-                self.on_submit(self.value)
+                await self.on_submit(self.value)
             return
 
         if kb.matches(data, "tui.editor.deleteCharBackward"):

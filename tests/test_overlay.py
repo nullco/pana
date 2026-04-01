@@ -7,6 +7,7 @@ Python pytest.
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable
 from typing import Callable
 
 from pana.tui.tui import TUI, OverlayMargin, OverlayOptions
@@ -38,12 +39,12 @@ class StubTerminal:
         self._columns = columns
         self._rows = rows
         self.writes: list[str] = []
-        self._on_input: Callable[[str], None] | None = None
-        self._on_resize: Callable[[], None] | None = None
 
-    def start(self, on_input: Callable[[str], None], on_resize: Callable[[], None]) -> None:
-        self._on_input = on_input
-        self._on_resize = on_resize
+    def start(self, on_resize: Callable[[], None]) -> None:
+        pass
+
+    async def run(self, on_input: Callable[[str], Awaitable[None]]) -> None:
+        pass
 
     def stop(self) -> None:
         pass
@@ -120,7 +121,7 @@ class _FocusableComponent:
     def render(self, width: int) -> list[str]:
         return [self.name or "focusable"]
 
-    def handle_input(self, data: str) -> None:
+    async def handle_input(self, data: str) -> None:
         self.inputs.append(data)
 
 
@@ -609,32 +610,29 @@ def test_hide_capturing_restores_focus() -> None:
     assert editor.focused is True
 
 
-def test_input_goes_to_capturing_overlay() -> None:
+async def test_input_goes_to_capturing_overlay() -> None:
     term = StubTerminal()
     tui, editor = _setup_nc_tui(term)
     overlay = _FocusableComponent("overlay")
     tui.show_overlay(overlay, OverlayOptions(non_capturing=False))
-    assert term._on_input is not None
-    term._on_input("x")
+    await tui._dispatch_key("x")
     assert "x" in overlay.inputs
     assert "x" not in editor.inputs
 
 
-def test_input_goes_to_editor_when_no_overlay() -> None:
+async def test_input_goes_to_editor_when_no_overlay() -> None:
     term = StubTerminal()
     tui, editor = _setup_nc_tui(term)
-    assert term._on_input is not None
-    term._on_input("x")
+    await tui._dispatch_key("x")
     assert "x" in editor.inputs
 
 
-def test_nc_overlay_skipped_for_input() -> None:
+async def test_nc_overlay_skipped_for_input() -> None:
     term = StubTerminal()
     tui, editor = _setup_nc_tui(term)
     overlay = _FocusableComponent("overlay")
     tui.show_overlay(overlay, OverlayOptions(non_capturing=True))
-    assert term._on_input is not None
-    term._on_input("x")
+    await tui._dispatch_key("x")
     assert "x" in editor.inputs
     assert "x" not in overlay.inputs
 

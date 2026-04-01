@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -224,7 +225,7 @@ class Editor:
         self._preferred_visual_col: int | None = None
         self._undo_stack: UndoStack[dict] = UndoStack()
 
-        self.on_submit: Callable[[str], None] | None = None
+        self.on_submit: Callable[[str], Awaitable[None]] | None = None
         self.on_change: Callable[[str], None] | None = None
         self.on_action: Callable[[str], None] | None = None
         self.disable_submit = False
@@ -423,7 +424,7 @@ class Editor:
 
     # -- Input handling --
 
-    def handle_input(self, data: str) -> None:
+    async def handle_input(self, data: str) -> None:
         kb = get_editor_keybindings()
 
         # App-level actions — dispatched before any editor handling
@@ -461,7 +462,7 @@ class Editor:
                 remaining = self._paste_buffer[end_idx + 6:]
                 self._paste_buffer = ""
                 if remaining:
-                    self.handle_input(remaining)
+                    await self.handle_input(remaining)
             return
 
         if kb.matches(data, "tui.input.copy"):
@@ -476,7 +477,7 @@ class Editor:
                 self._cancel_autocomplete()
                 return
             if kb.matches(data, "tui.select.up") or kb.matches(data, "tui.select.down"):
-                self._autocomplete_list.handle_input(data)
+                await self._autocomplete_list.handle_input(data)
                 return
             if kb.matches(data, "tui.input.tab"):
                 sel = self._autocomplete_list.get_selected_item()
@@ -576,7 +577,7 @@ class Editor:
         ):
             if self._should_submit_on_backslash_enter(data, kb):
                 self._handle_backspace()
-                self._submit()
+                await self._submit()
                 return
             self._add_new_line()
             return
@@ -590,7 +591,7 @@ class Editor:
                 self._handle_backspace()
                 self._add_new_line()
                 return
-            self._submit()
+            await self._submit()
             return
 
         # Arrow keys with history
@@ -784,7 +785,7 @@ class Editor:
         if self.on_change:
             self.on_change(self.get_text())
 
-    def _submit(self) -> None:
+    async def _submit(self) -> None:
         result = "\n".join(self._lines).strip()
         for pid, content in self._pastes.items():
             result = re.sub(rf"\[paste #{pid}( (\+\d+ lines|\d+ chars))?\]", content, result)
@@ -800,7 +801,7 @@ class Editor:
         if self.on_change:
             self.on_change("")
         if self.on_submit:
-            self.on_submit(result)
+            await self.on_submit(result)
 
     def _handle_backspace(self) -> None:
         self._history_index = -1

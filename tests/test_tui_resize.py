@@ -7,6 +7,7 @@ re-renders from scratch via ``fullRender(true)``.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from typing import Callable
 
 from pana.tui.tui import TUI
@@ -23,14 +24,15 @@ class StubTerminal:
         self._columns = columns
         self._rows = rows
         self.writes: list[str] = []
-        self._on_input: Callable[[str], None] | None = None
         self._on_resize: Callable[[], None] | None = None
 
     # -- Terminal protocol --
 
-    def start(self, on_input: Callable[[str], None], on_resize: Callable[[], None]) -> None:
-        self._on_input = on_input
+    def start(self, on_resize: Callable[[], None]) -> None:
         self._on_resize = on_resize
+
+    async def run(self, on_input: Callable[[str], Awaitable[None]]) -> None:
+        pass
 
     def stop(self) -> None:
         pass

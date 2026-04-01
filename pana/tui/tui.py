@@ -540,10 +540,18 @@ class TUI(Container):
 
     def start(self) -> None:
         self.stopped = False
-        self.terminal.start(self._handle_input, self._handle_resize)
         self.terminal.hide_cursor()
         self.query_cell_size()
         self.request_render()
+
+    async def run(self) -> None:
+        """Start the terminal, run the async input loop, and return when stopped."""
+        self.stopped = False
+        self.terminal.start(self._handle_resize)
+        self.terminal.hide_cursor()
+        self.query_cell_size()
+        self.request_render()
+        await self.terminal.run(self._handle_input)
 
     def stop(self) -> None:
         self.stopped = True
@@ -587,12 +595,12 @@ class TUI(Container):
     # Input handling
     # ------------------------------------------------------------------
 
-    def _handle_input(self, data: str) -> None:
+    async def _handle_input(self, data: str) -> None:
         if self.stopped:
             return
-        self._dispatch_key(data)
+        await self._dispatch_key(data)
 
-    def _dispatch_key(self, data: str) -> None:
+    async def _dispatch_key(self, data: str) -> None:
         # Input-listener pipeline: listeners may transform or consume events
         if self._input_listeners:
             current = data
@@ -645,7 +653,7 @@ class TUI(Container):
                 self.focused_component, "wants_key_release", False
             ):
                 return
-            self.focused_component.handle_input(data)  # type: ignore[union-attr]
+            await self.focused_component.handle_input(data)  # type: ignore[union-attr]
 
         self.request_render()
 

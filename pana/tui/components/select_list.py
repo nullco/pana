@@ -1,6 +1,7 @@
 """Keyboard-navigable selection list component with optional search filtering."""
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Callable
 
@@ -69,8 +70,8 @@ class SelectList:
 
         self.focused: bool = False
 
-        self.on_select: Callable[[SelectItem], None] | None = None
-        self.on_cancel: Callable[[], None] | None = None
+        self.on_select: Callable[[SelectItem], Awaitable[None]] | None = None
+        self.on_cancel: Callable[[], Awaitable[None]] | None = None
         self.on_selection_change: Callable[[SelectItem | None], None] | None = None
 
     def set_filter(self, filter_text: str) -> None:
@@ -232,7 +233,7 @@ class SelectList:
         result.extend(lines)
         return result
 
-    def handle_input(self, data: str) -> None:
+    async def handle_input(self, data: str) -> None:
         kb = get_editor_keybindings()
 
         if kb.matches(data, "tui.select.up"):
@@ -260,11 +261,11 @@ class SelectList:
         if kb.matches(data, "tui.select.confirm") or kb.matches(data, "tui.input.tab"):
             item = self.get_selected_item()
             if item and self.on_select:
-                self.on_select(item)
+                await self.on_select(item)
             return
         if kb.matches(data, "tui.select.cancel"):
             if self.on_cancel:
-                self.on_cancel()
+                await self.on_cancel()
             return
 
         # Text input for searchable lists

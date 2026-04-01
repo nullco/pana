@@ -50,7 +50,10 @@ class StubTerminal:
         self._columns = columns
         self._rows = rows
 
-    def start(self, on_input, on_resize):
+    def start(self, on_resize):
+        pass
+
+    async def run(self, on_input):
         pass
 
     def stop(self):
@@ -132,9 +135,9 @@ def _make_editor(text: str = "", width: int = 80, rows: int = 24) -> Editor:
     return editor
 
 
-def _type_text(editor: Editor, text: str) -> None:
+async def _type_text(editor: Editor, text: str) -> None:
     for ch in text:
-        editor.handle_input(ch)
+        await editor.handle_input(ch)
 
 
 class _MockAutocompleteProvider:
@@ -244,7 +247,7 @@ class TestEditorComponentProtocol:
             def set_text(self, text: str) -> None:
                 pass
 
-            def handle_input(self, data: str) -> None:
+            async def handle_input(self, data: str) -> None:
                 pass
 
             def add_to_history(self, text: str) -> None:
@@ -348,7 +351,7 @@ class TestPasteMarkerSegmentation:
 
 
 class TestShouldSubmitOnBackslashEnter:
-    def test_backslash_enter_submits_when_submit_remapped_to_shift_enter(self) -> None:
+    async def test_backslash_enter_submits_when_submit_remapped_to_shift_enter(self) -> None:
         """When submit is mapped to shift+enter, backslash+enter should submit."""
         from pana.tui.keybindings import TUI_KEYBINDINGS, KeybindingsManager
 
@@ -363,24 +366,28 @@ class TestShouldSubmitOnBackslashEnter:
         editor = Editor(tui, _THEME)
 
         submitted: list[str] = []
-        editor.on_submit = lambda t: submitted.append(t)
 
-        _type_text(editor, "hello\\")
+        async def _on_submit(t: str) -> None:
+            submitted.append(t)
+
+        editor.on_submit = _on_submit
+
+        await _type_text(editor, "hello\\")
         # Now send enter (which is mapped to newLine)
         # The editor should detect backslash + enter and submit
         assert editor._should_submit_on_backslash_enter(_ENTER, custom_kb)
 
-    def test_backslash_enter_does_not_submit_with_default_keybindings(self) -> None:
+    async def test_backslash_enter_does_not_submit_with_default_keybindings(self) -> None:
         """With default keybindings (enter=submit), backslash should be kept."""
         from pana.tui.keybindings import TUI_KEYBINDINGS, KeybindingsManager
 
         default_kb = KeybindingsManager(TUI_KEYBINDINGS)
 
         editor = _make_editor()
-        _type_text(editor, "hello\\")
+        await _type_text(editor, "hello\\")
         assert not editor._should_submit_on_backslash_enter(_ENTER, default_kb)
 
-    def test_backslash_enter_does_not_submit_when_disabled(self) -> None:
+    async def test_backslash_enter_does_not_submit_when_disabled(self) -> None:
         """When submit is disabled, backslash+enter should not submit."""
         from pana.tui.keybindings import TUI_KEYBINDINGS, KeybindingsManager
 
@@ -391,7 +398,7 @@ class TestShouldSubmitOnBackslashEnter:
 
         editor = _make_editor()
         editor.disable_submit = True
-        _type_text(editor, "hello\\")
+        await _type_text(editor, "hello\\")
         assert not editor._should_submit_on_backslash_enter(_ENTER, custom_kb)
 
 
@@ -429,41 +436,41 @@ class TestSetAutocompleteMaxVisible:
 
 
 class TestSlashAutocompleteChaining:
-    def test_should_chain_when_in_slash_context_regular_mode(self) -> None:
+    async def test_should_chain_when_in_slash_context_regular_mode(self) -> None:
         editor = _make_editor()
-        _type_text(editor, "/mod")
+        await _type_text(editor, "/mod")
         editor._autocomplete_state = "regular"
         assert editor._should_chain_slash_autocomplete_on_tab()
 
-    def test_should_not_chain_when_force_mode(self) -> None:
+    async def test_should_not_chain_when_force_mode(self) -> None:
         editor = _make_editor()
-        _type_text(editor, "/mod")
+        await _type_text(editor, "/mod")
         editor._autocomplete_state = "force"
         assert not editor._should_chain_slash_autocomplete_on_tab()
 
-    def test_should_not_chain_when_space_in_command(self) -> None:
+    async def test_should_not_chain_when_space_in_command(self) -> None:
         editor = _make_editor()
-        _type_text(editor, "/model arg")
+        await _type_text(editor, "/model arg")
         editor._autocomplete_state = "regular"
         assert not editor._should_chain_slash_autocomplete_on_tab()
 
-    def test_is_bare_completed_slash_at_cursor(self) -> None:
+    async def test_is_bare_completed_slash_at_cursor(self) -> None:
         editor = _make_editor()
-        _type_text(editor, "/model ")
+        await _type_text(editor, "/model ")
         assert editor._is_bare_completed_slash_at_cursor()
 
-    def test_is_not_bare_when_cursor_not_at_end(self) -> None:
+    async def test_is_not_bare_when_cursor_not_at_end(self) -> None:
         editor = _make_editor()
-        _type_text(editor, "/model ")
+        await _type_text(editor, "/model ")
         editor._cursor_col = 3  # Not at end
         assert not editor._is_bare_completed_slash_at_cursor()
 
-    def test_is_not_bare_when_no_trailing_space(self) -> None:
+    async def test_is_not_bare_when_no_trailing_space(self) -> None:
         editor = _make_editor()
-        _type_text(editor, "/model")
+        await _type_text(editor, "/model")
         assert not editor._is_bare_completed_slash_at_cursor()
 
-    def test_tab_chains_arg_completions_for_slash_commands(self) -> None:
+    async def test_tab_chains_arg_completions_for_slash_commands(self) -> None:
         """Tab on slash command should chain into argument completions."""
         editor = _make_editor()
 
@@ -484,15 +491,15 @@ class TestSlashAutocompleteChaining:
         )
         editor.set_autocomplete_provider(provider)
 
-        _type_text(editor, "/mod")
+        await _type_text(editor, "/mod")
         assert editor.is_showing_autocomplete()
 
         # Tab completes "/mod" → "/model " AND opens arg completions
-        editor.handle_input(_TAB)
+        await editor.handle_input(_TAB)
         assert editor.get_text() == "/model "
         assert editor.is_showing_autocomplete()
 
-    def test_tab_does_not_chain_for_force_file_mode(self) -> None:
+    async def test_tab_does_not_chain_for_force_file_mode(self) -> None:
         """Force file mode should not chain into slash completions."""
         editor = _make_editor()
 
@@ -510,11 +517,11 @@ class TestSlashAutocompleteChaining:
         provider = _MockAutocompleteProvider(force_fn=force_fn)
         editor.set_autocomplete_provider(provider)
 
-        editor.handle_input(_TAB)
+        await editor.handle_input(_TAB)
         assert editor.is_showing_autocomplete()
 
         # Tab accepts selection → should NOT chain
-        editor.handle_input(_TAB)
+        await editor.handle_input(_TAB)
         assert not editor.is_showing_autocomplete()
 
 

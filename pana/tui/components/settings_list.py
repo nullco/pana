@@ -1,6 +1,7 @@
 """Settings panel with value cycling and submenus."""
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -36,7 +37,7 @@ class SettingsList:
         max_visible: int,
         theme: SettingsListTheme,
         on_change: Callable[[str, str], None],
-        on_cancel: Callable[[], None],
+        on_cancel: Callable[[], Awaitable[None]],
         *,
         enable_search: bool = False,
     ) -> None:
@@ -124,10 +125,10 @@ class SettingsList:
         self._add_hint_line(lines, width)
         return lines
 
-    def handle_input(self, data: str) -> None:
+    async def handle_input(self, data: str) -> None:
         if self._submenu_component:
             if hasattr(self._submenu_component, "handle_input"):
-                self._submenu_component.handle_input(data)
+                await self._submenu_component.handle_input(data)
             return
 
         kb = get_editor_keybindings()
@@ -146,12 +147,12 @@ class SettingsList:
         elif kb.matches(data, "tui.select.confirm") or data == " ":
             self._activate_item()
         elif kb.matches(data, "tui.select.cancel"):
-            self._on_cancel()
+            await self._on_cancel()
         elif self._search_enabled and self._search_input:
             sanitized = data.replace(" ", "")
             if not sanitized:
                 return
-            self._search_input.handle_input(sanitized)
+                await self._search_input.handle_input(sanitized)
             self._apply_filter(self._search_input.get_value())
 
     def _activate_item(self) -> None:
