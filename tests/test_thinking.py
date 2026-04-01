@@ -15,10 +15,7 @@ from pana.agents.agent import (
     ToolResultEvent,
 )
 from pana.app.theme import italic as _italic, thinking_text as _thinking_text
-from pana.main import (
-    COMMANDS,
-    _resolve_command,
-)
+from pana.app.commands import default_registry
 from pana.state import State
 from pana.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
 from pana.tui.components.spacer import Spacer
@@ -204,16 +201,20 @@ def test_spacer_renders_empty_line() -> None:
 
 
 def test_settings_command_registered() -> None:
-    """The /settings command should be in the COMMANDS dict."""
-    assert "settings" in COMMANDS
+    """The /settings command should be in the registry completions."""
+    assert "settings" in default_registry.completions()
 
 
 def test_resolve_settings_command_full() -> None:
-    assert _resolve_command("/settings") == "settings"
+    resolved = default_registry.resolve("/settings")
+    assert resolved is not None
+    assert resolved.name == "settings"
 
 
 def test_resolve_settings_command_prefix() -> None:
-    assert _resolve_command("/se") == "settings"
+    resolved = default_registry.resolve("/se")
+    assert resolved is not None
+    assert resolved.name == "settings"
 
 
 # ===================================================================
