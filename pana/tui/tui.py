@@ -489,19 +489,17 @@ class TUI(Container):
             if hasattr(entry.component, "invalidate"):
                 entry.component.invalidate()
 
-    def start(self) -> None:
-        self.stopped = False
-        self.terminal.hide_cursor()
-        self.query_cell_size()
-        self.request_render()
-
-    async def run(self) -> None:
-        """Start the terminal, run the async input loop, and return when stopped."""
+    def _init(self) -> None:
+        """Synchronous setup: raw-mode terminal, cursor, cell-size query, first render."""
         self.stopped = False
         self.terminal.start(self._handle_resize)
         self.terminal.hide_cursor()
         self.query_cell_size()
         self.request_render()
+
+    async def start(self) -> None:
+        """Start the TUI and block until stop() is called."""
+        self._init()
         await self.terminal.run(self._handle_input)
 
     def stop(self) -> None:

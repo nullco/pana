@@ -110,7 +110,7 @@ def _setup_tui(term: StubTerminal, content_lines: list[str]) -> TUI:
     tui = TUI(term)
     comp = _FixedComponent(content_lines)
     tui.add_child(comp)
-    tui.start()
+    tui._init()
     # The first render happens via call_soon; force it now.
     tui._do_render()
     term.clear_writes()
@@ -230,7 +230,7 @@ def test_first_render_no_clear() -> None:
     tui = TUI(term)
     comp = _FixedComponent(["hello", "world"])
     tui.add_child(comp)
-    tui.start()
+    tui._init()
     tui._do_render()
 
     buf = term.last_write()
@@ -251,7 +251,7 @@ def test_differential_update_no_clear() -> None:
     comp = _FixedComponent(["line-0", "line-1", "line-2"])
     tui = TUI(term)
     tui.add_child(comp)
-    tui.start()
+    tui._init()
     tui._do_render()
     term.clear_writes()
 

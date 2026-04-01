@@ -468,7 +468,7 @@ class MiniApp:
         self._setup_ui()
         self.update_footer()
         try:
-            await self.tui.run()
+            await self.tui.start()
         except (KeyboardInterrupt, EOFError):
             pass
         finally:

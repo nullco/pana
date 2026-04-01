@@ -541,7 +541,7 @@ def _setup_nc_tui(
     editor = _FocusableComponent("editor")
     tui.add_child(editor)
     tui.set_focus(editor)
-    tui.start()
+    tui._init()
     tui._do_render()
     return tui, editor
 

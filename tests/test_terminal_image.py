@@ -40,8 +40,7 @@ class StubTerminal:
         self._on_input: Callable[[str], None] | None = None
         self._on_resize: Callable[[], None] | None = None
 
-    def start(self, on_input: Callable[[str], None], on_resize: Callable[[], None]) -> None:
-        self._on_input = on_input
+    def start(self, on_resize: Callable[[], None]) -> None:
         self._on_resize = on_resize
 
     def stop(self) -> None:
@@ -537,7 +536,7 @@ def test_tui_no_reset_on_image_lines() -> None:
     term = StubTerminal(columns=80, rows=24)
     tui = TUI(term)
     tui.add_child(_FixedComponent([kitty_line, "normal text"]))
-    tui.start()
+    tui._init()
     tui._do_render()
 
     output = "".join(term.writes)
