@@ -22,6 +22,15 @@ from pana.app import theme as _theme
 from pana.app import ui_themes
 from pana.app.commands import default_registry
 from pana.app.tool_renderer import ToolView, format_call, format_result
+from pana.extensions import (
+    ExtensionAPI,
+    ExtensionManager,
+    InputEvent,
+    SessionShutdownEvent,
+    SessionStartEvent,
+    discover_extension_paths,
+    load_extension,
+)
 from pana.state import state
 from pana.tui.autocomplete import CombinedAutocompleteProvider, SlashCommand
 from pana.tui.components.box import Box
@@ -88,9 +97,11 @@ class _UserMessage(Text):
 class PanaApp:
     """Manages the TUI app lifecycle and implements :class:`CommandContext`."""
 
-    def __init__(self) -> None:
+    def __init__(self, extension_paths: list[str] | None = None) -> None:
         self.agent: Agent | None = None
         self.hide_thinking_block: bool = state.get("hide_thinking_block", False)
+        self._extension_paths = extension_paths or []
+        self._extension_manager: ExtensionManager | None = None
 
         self.terminal = ProcessTerminal()
         self.tui = TUI(self.terminal)
@@ -152,13 +163,37 @@ class PanaApp:
         self.tui.request_render()
 
     def set_agent(self, agent: Agent) -> None:
-        """Replace the active agent."""
+        """Replace the active agent, injecting the extension manager if available."""
+        if self._extension_manager and agent._extension_manager is None:
+            agent._extension_manager = self._extension_manager
+            agent._agent = agent._build_agent()
         self.agent = agent
 
     def set_hide_thinking_block(self, value: bool) -> None:
         """Set thinking-block visibility and persist it to state."""
         self.hide_thinking_block = value
         state.set("hide_thinking_block", value)
+
+    def notify(self, message: str, level: str = "info") -> None:
+        """Display a notification message in the chat area (used by extensions)."""
+        if level == "error":
+            styled = _theme.error(f"[ext] {message}")
+        else:
+            styled = _theme.muted(f"[ext] {message}")
+        self.add_message(Text(styled, padding_x=1, padding_y=0))
+        self.tui.request_render()
+
+    def _load_extensions(self) -> None:
+        """Discover and load all extensions; register their commands."""
+        self._extension_manager = ExtensionManager(notify_fn=self.notify)
+        paths = discover_extension_paths(self._extension_paths)
+        for path in paths:
+            api = ExtensionAPI()
+            if load_extension(path, api):
+                self._extension_manager.add_api(api)
+        # Register extension commands into the global registry
+        for cmd_obj in self._extension_manager.build_command_objects():
+            default_registry.register(cmd_obj)  # type: ignore[arg-type]
 
     def _setup_ui(self) -> None:
         self._footer = Footer(dim_fn=_theme.dim)
@@ -232,6 +267,18 @@ class PanaApp:
         if self._editor:
             self._editor.add_to_history(text)
 
+        # Fire extension input event — handlers may transform, handle, or pass through
+        if self._extension_manager and self._extension_manager.has_extensions:
+            ext_ctx = self._extension_manager.make_context()
+            input_event = InputEvent(text=text)
+            result = await self._extension_manager.emit("input", input_event, ext_ctx)
+            if isinstance(result, dict):
+                action = result.get("action", "continue")
+                if action == "handled":
+                    return
+                if action == "transform":
+                    text = result.get("text", text)
+
         if text.startswith("/"):
             handled = await default_registry.dispatch(text, self)
             if not handled:
@@ -243,7 +290,7 @@ class PanaApp:
 
         if not self.agent:
             self.add_message(
-                Text(_theme.error("❌ Please select a model first (/model)"), padding_x=1, padding_y=0)
+                Text(_theme.error("\u274c Please select a model first (/model)"), padding_x=1, padding_y=0)
             )
             self.add_message(Spacer(1))
             return
@@ -270,6 +317,19 @@ class PanaApp:
         self._awaiting_response = True
 
         user_text = _strip_at_prefixes(user_text)
+
+        # Fire before_agent_start — extensions may inject extra system-prompt text
+        if self._extension_manager and self._extension_manager.has_extensions:
+            from pana.extensions.api import BeforeAgentStartEvent
+            ext_ctx = self._extension_manager.make_context()
+            before_event = BeforeAgentStartEvent(prompt=user_text)
+            result = await self._extension_manager.emit(
+                "before_agent_start", before_event, ext_ctx
+            )
+            if isinstance(result, dict) and "system_prompt" in result:
+                self.agent.set_extra_system_prompt(str(result["system_prompt"]))
+            else:
+                self.agent.set_extra_system_prompt(None)
 
         cancel_event = asyncio.Event()
         _handler_active = True
@@ -455,35 +515,59 @@ class PanaApp:
         except Exception:
             pass
 
+        # Load extensions before building the agent so extension tools are included
+        self._load_extensions()
+
         model_id = state.get("model")
         provider_name = state.get("provider")
         if model_id and provider_name:
             try:
                 thinking_level = state.get("thinking_level", "medium")
                 model = await get_provider(provider_name).build_model(model_id)
-                self.agent = Agent(model, thinking_level=thinking_level)
+                self.agent = Agent(
+                    model,
+                    thinking_level=thinking_level,
+                    extension_manager=self._extension_manager,
+                )
             except Exception:
                 pass
 
         self._setup_ui()
         self.update_footer()
+
+        # Fire session_start after UI is ready
+        if self._extension_manager and self._extension_manager.has_extensions:
+            ext_ctx = self._extension_manager.make_context()
+            await self._extension_manager.emit(
+                "session_start", SessionStartEvent(), ext_ctx
+            )
+
         try:
             await self.tui.start()
         except (KeyboardInterrupt, EOFError):
             pass
         finally:
+            # Fire session_shutdown before TUI teardown
+            if self._extension_manager and self._extension_manager.has_extensions:
+                ext_ctx = self._extension_manager.make_context()
+                try:
+                    await self._extension_manager.emit(
+                        "session_shutdown", SessionShutdownEvent(), ext_ctx
+                    )
+                except Exception:
+                    pass
             if not self.tui.stopped:
                 self.tui.stop()
 
 
-async def main() -> None:
-    app = PanaApp()
+async def main(extension_paths: list[str] | None = None) -> None:
+    app = PanaApp(extension_paths=extension_paths)
     await app.run()
 
 
-def run() -> None:
+def run(extension_paths: list[str] | None = None) -> None:
     try:
-        asyncio.run(main())
+        asyncio.run(main(extension_paths=extension_paths))
     finally:
         state.save()
 

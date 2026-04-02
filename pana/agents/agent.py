@@ -3,6 +3,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from pydantic_ai._agent_graph import CallToolsNode, End, ModelRequestNode
 from pydantic_ai.agent import Agent as PydanticAgent
@@ -18,6 +19,9 @@ from pana.agents.tool_streams import (
 from pana.agents.tools import tool_bash, tool_edit, tool_read, tool_write
 from pana.ai.providers.model import Model
 
+if TYPE_CHECKING:
+    from pana.extensions.manager import ExtensionManager
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,6 +36,8 @@ class _CancelledByEvent(BaseException):
 
 THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh")
 
+_BUILTIN_TOOL_FNS = [tool_read, tool_edit, tool_write, tool_bash]
+_BUILTIN_TOOL_NAMES = ["read", "edit", "write", "bash"]
 
 
 @dataclass
@@ -81,7 +87,6 @@ class ThinkingEvent:
 StreamEvent = ToolCallEvent | ToolCallUpdateEvent | ToolResultEvent | TextEvent | ThinkingEvent
 
 
-
 @dataclass
 class _RunState:
     """Holds all mutable bookkeeping for a single agent run."""
@@ -97,20 +102,58 @@ class _RunState:
 
 class Agent:
 
-    def __init__(self, model: Model, thinking_level: str = "medium") -> None:
+    def __init__(
+        self,
+        model: Model,
+        thinking_level: str = "medium",
+        extension_manager: "ExtensionManager | None" = None,
+    ) -> None:
         self._model = model
         self._thinking_level = thinking_level
-        self._system_prompt = build_system_prompt()
-        self._agent = self._build_agent()
+        self._extension_manager = extension_manager
+        self._extra_system_prompt: str | None = None
+        self._current_cancel_event: asyncio.Event | None = None
         self._message_history = None
+        self._system_prompt = build_system_prompt(
+            extra_tool_snippets=self._get_extension_tool_snippets()
+        )
+        self._agent = self._build_agent()
+
+    def _get_extension_tool_snippets(self) -> dict[str, str]:
+        if self._extension_manager is None:
+            return {}
+        return {
+            defn.name: defn.description
+            for defn in self._extension_manager.get_tool_definitions()
+        }
+
+    def _get_all_tools(self) -> list[Callable]:
+        """Return the complete tool list: built-ins (wrapped if extensions present) + extension tools."""
+        if self._extension_manager is None:
+            return list(_BUILTIN_TOOL_FNS)
+
+        def cancel_getter() -> asyncio.Event | None:
+            return self._current_cancel_event
+
+        return self._extension_manager.build_all_tools(
+            _BUILTIN_TOOL_FNS, _BUILTIN_TOOL_NAMES, cancel_getter
+        )
 
     def _build_agent(self) -> PydanticAgent:
-        kwargs = {
+        base_prompt = build_system_prompt(
+            extra_tool_snippets=self._get_extension_tool_snippets()
+        )
+        if self._extra_system_prompt:
+            system_prompt = f"{base_prompt}\n\n{self._extra_system_prompt.strip()}"
+        else:
+            system_prompt = base_prompt
+
+        kwargs: dict = {
             "model": self._model.instance,
-            "tools": [tool_read, tool_edit, tool_write, tool_bash],
+            "tools": self._get_all_tools(),
         }
-        if self._system_prompt:
-            kwargs["system_prompt"] = self._system_prompt
+        if system_prompt:
+            kwargs["system_prompt"] = system_prompt
         return PydanticAgent(**kwargs)
 
     @property
@@ -130,6 +173,15 @@ class Agent:
             raise ValueError(f"Invalid thinking level: {level!r}. Must be one of {THINKING_LEVELS}")
         self._thinking_level = level
 
+    def set_extra_system_prompt(self, extra: str | None) -> None:
+        """Set (or clear) additional system-prompt text injected by extensions.
+
+        Rebuilds the pydantic-ai agent only when the value changes.
+        """
+        if extra != self._extra_system_prompt:
+            self._extra_system_prompt = extra
+            self._agent = self._build_agent()
+
     def _build_model_settings(self) -> ModelSettings | None:
         if not self._thinking_level or self._thinking_level == "off":
             return None
@@ -144,7 +196,7 @@ class Agent:
 
     def clear_history(self) -> None:
         self._message_history = None
-        self._system_prompt = build_system_prompt()
+        self._extra_system_prompt = None
         self._agent = self._build_agent()
 
     async def stream(
@@ -164,9 +216,19 @@ class Agent:
         teardown issues and lets the caller restore the UI immediately.
         """
         await self._ensure_auth()
+        self._current_cancel_event = cancel_event
         state = _RunState()
 
-        async with self._agent.iter(
+        ext = self._extension_manager
+        ext_ctx = ext.make_context(signal=cancel_event) if ext else None
+
+        try:
+            if ext and ext_ctx:
+                from pana.extensions.api import AgentStartEvent
+                await ext.emit("agent_start", AgentStartEvent(prompt=user_input), ext_ctx)
+
+            turn_index = 0
+            async with self._agent.iter(
                 user_input,
                 message_history=self._message_history,
                 model_settings=self._build_model_settings(),
@@ -177,6 +239,13 @@ class Agent:
                         if cancel_event and cancel_event.is_set():
                             break
                         if isinstance(node, ModelRequestNode):
+                            if ext and ext_ctx:
+                                from pana.extensions.api import TurnStartEvent
+                                await ext.emit(
+                                    "turn_start",
+                                    TurnStartEvent(turn_index=turn_index),
+                                    ext_ctx,
+                                )
                             node = await self._stream_model_request_node(
                                 node, agent_run, state, event_handler, cancel_event
                             )
@@ -184,10 +253,26 @@ class Agent:
                             node = await self._process_call_tools_node(
                                 node, agent_run, state, event_handler
                             )
+                            if ext and ext_ctx:
+                                from pana.extensions.api import TurnEndEvent
+                                await ext.emit(
+                                    "turn_end",
+                                    TurnEndEvent(turn_index=turn_index),
+                                    ext_ctx,
+                                )
+                            turn_index += 1
                         else:
                             node = await agent_run.next(node)
                 finally:
                     self._message_history = agent_run.all_messages()
+
+            if ext and ext_ctx:
+                from pana.extensions.api import AgentEndEvent
+                await ext.emit("agent_end", AgentEndEvent(prompt=user_input), ext_ctx)
+
+        finally:
+            self._current_cancel_event = None
+
     async def _ensure_auth(self) -> None:
         """Re-authenticate if the provider token is close to expiry."""
         if self._model.provider.should_reauthenticate():

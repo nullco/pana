@@ -1,5 +1,6 @@
 """TUI application entry point."""
 
+import argparse
 import logging
 import os
 
@@ -15,10 +16,28 @@ logging.basicConfig(
 )
 
 
-def main():
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Pana — a minimalist AI coding agent",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "-e",
+        "--extension",
+        action="append",
+        default=[],
+        dest="extensions",
+        metavar="PATH",
+        help=(
+            "Load an extension from PATH (.py file or directory with index.py). "
+            "May be supplied multiple times."
+        ),
+    )
+    args = parser.parse_args()
+
     from pana.main import run
 
-    run()
+    run(extension_paths=args.extensions or None)
 
 
 if __name__ == "__main__":

@@ -57,6 +57,7 @@ def build_system_prompt(
     extra_guidelines: list[str] | None = None,
     append_prompt: str | None = None,
     cwd: Path | None = None,
+    extra_tool_snippets: dict[str, str] | None = None,
 ) -> str:
     """Build the full system prompt for the pana agent.
 
@@ -65,6 +66,8 @@ def build_system_prompt(
         extra_guidelines: Additional guidelines to append after the base ones.
         append_prompt: Extra text inserted after guidelines and before context.
         cwd: Working directory to embed. Defaults to ``Path.cwd()``.
+        extra_tool_snippets: Additional ``{name: description}`` entries from
+            extension-registered tools, appended after the built-in snippets.
 
     Returns:
         The fully rendered system prompt string.
@@ -78,6 +81,9 @@ def build_system_prompt(
         for name in active_tools
         if name in TOOL_SNIPPETS
     ]
+    for ext_name, ext_desc in (extra_tool_snippets or {}).items():
+        if ext_desc:
+            tools_lines.append(f"- {ext_name}: {ext_desc}")
     tools_block = "\n".join(tools_lines) if tools_lines else "(none)"
 
     guidelines: list[str] = list(BASE_GUIDELINES)
