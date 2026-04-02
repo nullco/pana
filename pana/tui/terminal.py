@@ -2,8 +2,6 @@
 
 Provides a Protocol for terminal interaction and a concrete ProcessTerminal
 implementation using sys.stdin/stdout, tty/termios, and asyncio.
-
-Mirrors the pi-tui TypeScript ProcessTerminal (MIT License).
 """
 
 from __future__ import annotations
@@ -65,7 +63,7 @@ class ProcessTerminal:
     """Terminal backed by the hosting process's stdin/stdout.
 
     Environment variables:
-        PI_TUI_WRITE_LOG  – path to append every written byte to (debug).
+        PANA_TUI_WRITE_LOG  – path to append every written byte to (debug).
     """
 
     def __init__(self) -> None:
@@ -80,7 +78,7 @@ class ProcessTerminal:
         self._modify_other_keys_active: bool = False
         self._stdin_buffer: StdinBuffer | None = None
         self._kitty_fallback_handle: asyncio.TimerHandle | None = None
-        self._write_log_path: str = os.environ.get("PI_TUI_WRITE_LOG", "")
+        self._write_log_path: str = os.environ.get("PANA_TUI_WRITE_LOG", "")
 
     @property
     def kitty_protocol_active(self) -> bool:

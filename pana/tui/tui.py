@@ -2,8 +2,6 @@
 
 Provides a Component protocol, Container, overlay management, and the main
 TUI class that drives the render loop against a Terminal backend.
-
-Mirrors the pi-tui TypeScript TUI class (MIT License).
 """
 from __future__ import annotations
 
@@ -212,11 +210,11 @@ class _OverlayLayout:
 class TUI(Container):
     """Main TUI engine with differential rendering and overlay support.
 
-    Environment variables (mirroring pi-tui TypeScript):
-        PI_HARDWARE_CURSOR   – set to "1" to show the hardware terminal cursor.
-        PI_CLEAR_ON_SHRINK   – set to "1" to full-clear when content shrinks.
-        PI_DEBUG_REDRAW      – set to "1" to log full-render reasons.
-        PI_TUI_DEBUG         – set to "1" to write per-render debug logs to /tmp/tui/.
+    Environment variables:
+        PANA_HARDWARE_CURSOR   – set to "1" to show the hardware terminal cursor.
+        PANA_CLEAR_ON_SHRINK   – set to "1" to full-clear when content shrinks.
+        PANA_DEBUG_REDRAW      – set to "1" to log full-render reasons.
+        PANA_TUI_DEBUG         – set to "1" to write per-render debug logs to /tmp/tui/.
     """
 
     def __init__(self, terminal: Terminal, show_hardware_cursor: bool | None = None) -> None:
@@ -243,9 +241,9 @@ class TUI(Container):
         self.show_hardware_cursor: bool = (
             show_hardware_cursor
             if show_hardware_cursor is not None
-            else os.environ.get("PI_HARDWARE_CURSOR") == "1"
+            else os.environ.get("PANA_HARDWARE_CURSOR") == "1"
         )
-        self.clear_on_shrink: bool = os.environ.get("PI_CLEAR_ON_SHRINK") == "1"
+        self.clear_on_shrink: bool = os.environ.get("PANA_CLEAR_ON_SHRINK") == "1"
 
         # Overlay system
         self._overlay_stack: list[_OverlayEntry] = []
@@ -617,9 +615,9 @@ class TUI(Container):
         return bool(os.environ.get("TERMUX_VERSION"))
 
     def _log_redraw(self, reason: str) -> None:
-        if os.environ.get("PI_DEBUG_REDRAW") != "1":
+        if os.environ.get("PANA_DEBUG_REDRAW") != "1":
             return
-        log_path = pathlib.Path.home() / ".pi" / "agent" / "pi-debug.log"
+        log_path = pathlib.Path.home() / ".pana" / "agent" / "pana-debug.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         import datetime
         msg = (
@@ -634,7 +632,7 @@ class TUI(Container):
 
     def _write_crash_log(self, new_lines: list[str], bad_idx: int, term_width: int) -> None:
         try:
-            crash_path = pathlib.Path.home() / ".pi" / "agent" / "pi-crash.log"
+            crash_path = pathlib.Path.home() / ".pana" / "agent" / "pana-crash.log"
             crash_path.parent.mkdir(parents=True, exist_ok=True)
             import datetime
             lines_dump = "\n".join(
@@ -859,7 +857,7 @@ class TUI(Container):
                     f"({visible_width(line)} > {width}).\n"
                     "This is likely caused by a custom component not truncating its output.\n"
                     "Use visible_width() to measure and truncate_to_width() to truncate lines.\n"
-                    f"Debug log written to: {pathlib.Path.home() / '.pi' / 'agent' / 'pi-crash.log'}"
+                    f"Debug log written to: {pathlib.Path.home() / '.pana' / 'agent' / 'pana-crash.log'}"
                 )
             buf += line
 

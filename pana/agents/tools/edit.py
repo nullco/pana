@@ -8,7 +8,7 @@ from pana.agents.tools._helpers import resolve_path
 
 
 def generate_diff_string(old_content: str, new_content: str, context_lines: int = 4) -> str:
-    """Generate a pi-style diff string with line numbers.
+    """Generate a diff string with line numbers.
 
     Output format per line:
       ``+NNN content``  — added line (new-file line number)

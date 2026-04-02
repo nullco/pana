@@ -1,4 +1,4 @@
-"""Keybindings configuration — mirrors the pi-tui TypeScript KeybindingsManager.
+"""Keybindings configuration.
 
 Structure:
   TUI_KEYBINDINGS  dict mapping dotted IDs (e.g. "tui.editor.cursorUp") to

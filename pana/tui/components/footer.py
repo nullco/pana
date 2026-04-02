@@ -1,6 +1,5 @@
 """Footer component showing model info below the editor.
 
-Mirrors the FooterComponent from the original pi-tui coding agent:
 - Line 1: cwd (with git branch if available)
 - Line 2: model name right-aligned, dimmed
 """

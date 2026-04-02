@@ -1,4 +1,4 @@
-"""EditorComponent protocol — matches the pi-tui TypeScript EditorComponent interface.
+"""EditorComponent protocol.
 
 This is the interface custom editors (e.g., vim mode) must implement to be
 drop-in replacements for the built-in Editor.

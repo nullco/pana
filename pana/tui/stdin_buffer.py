@@ -3,8 +3,6 @@
 This is necessary because stdin data events can arrive in partial chunks,
 especially for escape sequences like mouse events. Without buffering,
 partial sequences can be misinterpreted as regular keypresses.
-
-Based on the pi-tui TypeScript implementation (MIT License).
 """
 from __future__ import annotations
 

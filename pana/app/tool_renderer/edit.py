@@ -18,7 +18,7 @@ from pana.app.tool_renderer.base import shorten_path
 
 
 def _render_diff(diff_string: str) -> str:
-    """Render a pi-style diff string with ANSI colors.
+    """Render a diff string with ANSI colors.
 
     Parses lines of the form ``+NNN content``, ``-NNN content``, `` NNN content``
     and ``     ...`` and applies green/red/dim colors respectively.

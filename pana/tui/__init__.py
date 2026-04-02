@@ -1,4 +1,4 @@
-"""TUI framework — Python backport of @mariozechner/pi-tui.
+"""TUI framework.
 
 Provides terminal UI components, keyboard handling, differential rendering,
 and overlay management.
