@@ -23,10 +23,6 @@ if TYPE_CHECKING:
 @runtime_checkable
 class CommandContext(Protocol):
     """Minimal interface that the host application must satisfy.
-
-    :class:`~pana.main.MiniApp` implements every method here.  External code
-    that creates commands should type its *ctx* parameter as
-    ``CommandContext`` so it stays decoupled from the concrete app class.
     """
 
     @property

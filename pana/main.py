@@ -85,7 +85,7 @@ class _UserMessage(Text):
         return lines
 
 
-class MiniApp:
+class PanaApp:
     """Manages the TUI app lifecycle and implements :class:`CommandContext`."""
 
     def __init__(self) -> None:
@@ -477,7 +477,7 @@ class MiniApp:
 
 
 async def main() -> None:
-    app = MiniApp()
+    app = PanaApp()
     await app.run()
 
 
