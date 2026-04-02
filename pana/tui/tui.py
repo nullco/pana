@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 @runtime_checkable
 class Component(Protocol):
     def render(self, width: int) -> list[str]: ...
+    def invalidate(self) -> None: ...
 
 
 @runtime_checkable
@@ -67,8 +68,7 @@ class Container:
 
     def invalidate(self) -> None:
         for child in self.children:
-            if hasattr(child, "invalidate"):
-                child.invalidate()
+            child.invalidate()
 
     def render(self, width: int) -> list[str]:
         lines: list[str] = []
@@ -493,8 +493,7 @@ class TUI(Container):
     def invalidate(self) -> None:
         super().invalidate()
         for entry in self._overlay_stack:
-            if hasattr(entry.component, "invalidate"):
-                entry.component.invalidate()
+            entry.component.invalidate()
 
     def _init(self) -> None:
         """Synchronous setup: raw-mode terminal, cursor, cell-size query, first render."""

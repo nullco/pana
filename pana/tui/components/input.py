@@ -72,6 +72,9 @@ class Input:
         self._typing_run: bool = False
 
 
+    def invalidate(self) -> None:
+        pass
+
     @staticmethod
     def _graphemes(text: str) -> list[str]:
         return list(grapheme.graphemes(text))

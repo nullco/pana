@@ -60,7 +60,7 @@ class SettingsList:
                 break
 
     def invalidate(self) -> None:
-        if self._submenu_component and hasattr(self._submenu_component, "invalidate"):
+        if self._submenu_component:
             self._submenu_component.invalidate()
 
     def render(self, width: int) -> list[str]:
