@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 import mistune
 
+from pana.tui.ansi import ANSI
 from pana.tui.utils import apply_background_to_line, visible_width, wrap_text_with_ansi
 
 
@@ -236,7 +237,7 @@ class Markdown:
                 styled = self._theme.quote(self._theme.italic(ql))
                 # Re-inject quote style after every ANSI reset so nested
                 # inline styles don't break the quote formatting.
-                styled = styled.replace("\x1b[0m", f"\x1b[0m{quote_style_prefix}")
+                styled = styled.replace(ANSI.RESET, f"{ANSI.RESET}{quote_style_prefix}")
                 for wl in wrap_text_with_ansi(styled, max(1, width - 2)):
                     lines.append(self._theme.quote_border("│ ") + wl)
             if next_type != "blank_line":

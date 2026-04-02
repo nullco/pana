@@ -50,6 +50,8 @@ from pygments.token import (
     Token,
 )
 
+from pana.tui.ansi import ANSI
+
 ColorFn = Callable[[str], str]
 
 _HEX_RE = re.compile(r"^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$")
@@ -114,14 +116,14 @@ _IDENTITY: ColorFn = lambda s: s  # noqa: E731
 
 def _make_fg(rgb: tuple[int, int, int]) -> ColorFn:
     r, g, b = rgb
-    code = f"\x1b[38;2;{r};{g};{b}m"
-    return lambda s: f"{code}{s}\x1b[39m"
+    code = ANSI.fg_rgb(r, g, b)
+    return lambda s: f"{code}{s}{ANSI.FG_RESET}"
 
 
 def _make_bg(rgb: tuple[int, int, int]) -> ColorFn:
     r, g, b = rgb
-    code = f"\x1b[48;2;{r};{g};{b}m"
-    return lambda s: f"{code}{s}\x1b[49m"
+    code = ANSI.bg_rgb(r, g, b)
+    return lambda s: f"{code}{s}{ANSI.BG_RESET}"
 
 
 def _color_to_hex(rgb: tuple[int, int, int]) -> str:

@@ -5,6 +5,7 @@ call updates every subsequent render without rebuilding any component.
 """
 from __future__ import annotations
 
+from pana.tui.ansi import ANSI
 from pana.tui.theme import PanaTheme, load_theme
 
 _current_theme: PanaTheme = load_theme("dark")
@@ -43,11 +44,11 @@ def tool_success_bg(s: str) -> str: return _current_theme.tool_success_bg(s)
 def tool_error_bg(s: str)   -> str: return _current_theme.tool_error_bg(s)
 
 # Text attributes — theme-independent ANSI codes
-def bold(s: str)          -> str: return f"\x1b[1m{s}\x1b[22m"
-def italic(s: str)        -> str: return f"\x1b[3m{s}\x1b[23m"
-def underline(s: str)     -> str: return f"\x1b[4m{s}\x1b[24m"
-def strikethrough(s: str) -> str: return f"\x1b[9m{s}\x1b[29m"
-def inverse(s: str)       -> str: return f"\x1b[7m{s}\x1b[27m"
+def bold(s: str)          -> str: return f"{ANSI.BOLD_ON}{s}{ANSI.BOLD_OFF}"
+def italic(s: str)        -> str: return f"{ANSI.ITALIC_ON}{s}{ANSI.ITALIC_OFF}"
+def underline(s: str)     -> str: return f"{ANSI.UNDERLINE_ON}{s}{ANSI.UNDERLINE_OFF}"
+def strikethrough(s: str) -> str: return f"{ANSI.STRIKETHROUGH_ON}{s}{ANSI.STRIKETHROUGH_OFF}"
+def inverse(s: str)       -> str: return f"{ANSI.INVERSE_ON}{s}{ANSI.INVERSE_OFF}"
 
 
 def highlight_code(code: str, lang: str | None) -> list[str]:

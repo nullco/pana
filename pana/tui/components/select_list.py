@@ -5,6 +5,7 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Callable
 
+from pana.tui.ansi import ANSI
 from pana.tui.fuzzy import fuzzy_filter
 from pana.tui.keybindings import get_editor_keybindings
 from pana.tui.keys import decode_kitty_printable
@@ -151,7 +152,7 @@ class SelectList:
             query_display = self._filter
             avail = max(1, width - len(prompt))
             query_display = truncate_to_width(query_display, avail)
-            cursor = "\x1b[7m \x1b[0m"
+            cursor = f"{ANSI.INVERSE_ON} {ANSI.RESET}"
             line = f"{prompt}{query_display}{cursor}"
             pad = max(0, width - visible_width(prompt) - visible_width(query_display) - 1)
             result.append(line + " " * pad)

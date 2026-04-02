@@ -11,9 +11,11 @@ from __future__ import annotations
 import asyncio
 from typing import Callable
 
+from pana.tui.ansi import ANSI
+
 ESC = "\x1b"
-BRACKETED_PASTE_START = "\x1b[200~"
-BRACKETED_PASTE_END = "\x1b[201~"
+BRACKETED_PASTE_START = ANSI.PASTE_START
+BRACKETED_PASTE_END = ANSI.PASTE_END
 
 def _is_complete_csi_sequence(data: str) -> str:
     """Check if a CSI (ESC [) sequence is complete."""

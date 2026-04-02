@@ -8,15 +8,15 @@ from pathlib import Path
 import pytest
 
 from pana.tui.theme import (
+    REQUIRED_COLOR_KEYS,
     PanaTheme,
     _256_to_rgb,
     _parse_hex,
     _resolve_rgb,
     discover_themes,
+    invalidate_cache,
     load_theme,
     load_theme_file,
-    invalidate_cache,
-    REQUIRED_COLOR_KEYS,
 )
 
 # ---------------------------------------------------------------------------

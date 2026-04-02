@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import grapheme
 
+from pana.tui.ansi import ANSI
 from pana.tui.keybindings import get_editor_keybindings
 from pana.tui.keys import decode_kitty_printable, matches_key
 from pana.tui.kill_ring import KillRing
-from pana.tui.tui import CURSOR_MARKER
 from pana.tui.undo_stack import UndoStack
 from pana.tui.utils import is_punctuation_char, is_whitespace_char, visible_width
 
@@ -344,16 +344,16 @@ class Editor:
                 cp = ll["cursor_pos"]
                 before = display[:cp]
                 after = display[cp:]
-                marker = CURSOR_MARKER if emit_marker else ""
+                marker = ANSI.CURSOR_MARKER if emit_marker else ""
 
                 if after:
                     gs = _graphemes(after)
                     first_g = gs[0] if gs else ""
                     rest = after[len(first_g):]
-                    cursor_ch = f"\x1b[7m{first_g}\x1b[0m"
+                    cursor_ch = f"{ANSI.INVERSE_ON}{first_g}{ANSI.RESET}"
                     display = before + marker + cursor_ch + rest
                 else:
-                    cursor_ch = "\x1b[7m \x1b[0m"
+                    cursor_ch = f"{ANSI.INVERSE_ON} {ANSI.RESET}"
                     display = before + marker + cursor_ch
                     line_vw += 1
                     if line_vw > content_width and px > 0:
@@ -445,13 +445,13 @@ class Editor:
             self._jump_mode = None
 
         # Bracketed paste
-        if "\x1b[200~" in data:
+        if ANSI.PASTE_START in data:
             self._is_in_paste = True
             self._paste_buffer = ""
-            data = data.replace("\x1b[200~", "")
+            data = data.replace(ANSI.PASTE_START, "")
         if self._is_in_paste:
             self._paste_buffer += data
-            end_idx = self._paste_buffer.find("\x1b[201~")
+            end_idx = self._paste_buffer.find(ANSI.PASTE_END)
             if end_idx != -1:
                 paste_content = self._paste_buffer[:end_idx]
                 if paste_content:

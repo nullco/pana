@@ -19,6 +19,7 @@ import tty
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
+from pana.tui.ansi import ANSI
 from pana.tui.keys import set_kitty_protocol_active
 from pana.tui.stdin_buffer import StdinBuffer
 
@@ -99,7 +100,7 @@ class ProcessTerminal:
         self._original_flags = fcntl.fcntl(fd, fcntl.F_GETFL)
 
         tty.setraw(fd)
-        self.write("\x1b[?2004h")
+        self.write(ANSI.BRACKETED_PASTE_ON)
 
         self._prev_sigwinch = signal.getsignal(signal.SIGWINCH)
         signal.signal(signal.SIGWINCH, self._handle_sigwinch)
@@ -120,15 +121,15 @@ class ProcessTerminal:
                 self._kitty_fallback_handle = None
 
             if self._kitty_protocol_active:
-                self.write("\x1b[<u")
+                self.write(ANSI.KITTY_DISABLE)
                 self._kitty_protocol_active = False
                 set_kitty_protocol_active(False)
 
             if self._modify_other_keys_active:
-                self.write("\x1b[>4;0m")
+                self.write(ANSI.MODIFY_OTHER_KEYS_OFF)
                 self._modify_other_keys_active = False
 
-            self.write("\x1b[?2004l")
+            self.write(ANSI.BRACKETED_PASTE_OFF)
 
             if self._stdin_buffer is not None:
                 self._stdin_buffer.destroy()
@@ -190,36 +191,36 @@ class ProcessTerminal:
 
     def move_by(self, lines: int) -> None:
         if lines > 0:
-            self.write(f"\x1b[{lines}B")
+            self.write(ANSI.cursor_down(lines))
         elif lines < 0:
-            self.write(f"\x1b[{-lines}A")
+            self.write(ANSI.cursor_up(-lines))
 
     def hide_cursor(self) -> None:
-        self.write("\x1b[?25l")
+        self.write(ANSI.HIDE_CURSOR)
 
     def show_cursor(self) -> None:
-        self.write("\x1b[?25h")
+        self.write(ANSI.SHOW_CURSOR)
 
     def clear_line(self) -> None:
-        self.write("\x1b[K")
+        self.write(ANSI.CLEAR_LINE)
 
     def clear_from_cursor(self) -> None:
-        self.write("\x1b[J")
+        self.write(ANSI.CLEAR_FROM_CURSOR)
 
     def clear_screen(self) -> None:
-        self.write("\x1b[2J\x1b[H")
+        self.write(ANSI.CLEAR_SCREEN)
 
     def set_title(self, title: str) -> None:
-        self.write(f"\x1b]0;{title}\x07")
+        self.write(ANSI.set_title(title))
 
     async def drain_input(self, max_ms: float = 1000, idle_ms: float = 50) -> None:
         # Disable keyboard protocol enhancements before draining
         if self._kitty_protocol_active:
-            self.write("\x1b[<u")
+            self.write(ANSI.KITTY_DISABLE)
             self._kitty_protocol_active = False
             set_kitty_protocol_active(False)
         if self._modify_other_keys_active:
-            self.write("\x1b[>4;0m")
+            self.write(ANSI.MODIFY_OTHER_KEYS_OFF)
             self._modify_other_keys_active = False
 
         saved_handler = self._on_input
@@ -286,14 +287,14 @@ class ProcessTerminal:
                     set_kitty_protocol_active(True)
                     # Enable Kitty keyboard protocol:
                     # flag 1 = disambiguate, flag 2 = event types, flag 4 = alternate keys
-                    self.write("\x1b[>7u")
+                    self.write(ANSI.KITTY_ENABLE)
                     return  # Do not forward protocol response to TUI
             if self._on_input is not None:
                 self._on_input(data)
 
         def _on_paste(content: str) -> None:
             if self._on_input is not None:
-                self._on_input("\x1b[200~" + content + "\x1b[201~")
+                self._on_input(ANSI.PASTE_START + content + ANSI.PASTE_END)
 
         buf.on_data = _on_data
         buf.on_paste = _on_paste
@@ -309,12 +310,12 @@ class ProcessTerminal:
         modifyOtherKeys mode 2 (useful in tmux without Kitty protocol forwarding).
         """
         # Query Kitty support
-        self.write("\x1b[?u")
+        self.write(ANSI.KITTY_QUERY)
 
         def _fallback() -> None:
             self._kitty_fallback_handle = None
             if not self._kitty_protocol_active and not self._modify_other_keys_active:
-                self.write("\x1b[>4;2m")
+                self.write(ANSI.MODIFY_OTHER_KEYS_ON)
                 self._modify_other_keys_active = True
 
         loop = asyncio.get_running_loop()

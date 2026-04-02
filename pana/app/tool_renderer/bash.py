@@ -1,7 +1,7 @@
 """Renderer for the tool_bash tool."""
 from __future__ import annotations
 
-from pana.app.theme import error, muted, tool_output
+from pana.app.theme import muted, tool_output
 
 PREVIEW_LINES = 5
 
@@ -10,7 +10,7 @@ class BashRenderer:
     tool_name = "tool_bash"
 
     def format_call(self, args: dict | str | None) -> str:
-        from pana.app.theme import bold, warning
+        from pana.app.theme import bold
 
         if isinstance(args, str):
             return bold(f"$ {args}")

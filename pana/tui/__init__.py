@@ -3,6 +3,7 @@
 Provides terminal UI components, keyboard handling, differential rendering,
 and overlay management.
 """
+from pana.tui.ansi import ANSI
 from pana.tui.autocomplete import (
     AutocompleteItem,
     AutocompleteProvider,
@@ -72,7 +73,6 @@ from pana.tui.terminal_image import (
     set_cell_dimensions,
 )
 from pana.tui.tui import (
-    CURSOR_MARKER,
     TUI,
     Component,
     Container,
@@ -83,6 +83,8 @@ from pana.tui.tui import (
     is_focusable,
 )
 from pana.tui.utils import truncate_to_width, visible_width, wrap_text_with_ansi
+
+CURSOR_MARKER = ANSI.CURSOR_MARKER
 
 __all__ = [
     # autocomplete

@@ -6,10 +6,10 @@ from typing import TypedDict
 
 import grapheme
 
+from pana.tui.ansi import ANSI
 from pana.tui.keybindings import get_editor_keybindings
 from pana.tui.keys import decode_kitty_printable
 from pana.tui.kill_ring import KillRing
-from pana.tui.tui import CURSOR_MARKER
 from pana.tui.undo_stack import UndoStack
 from pana.tui.utils import (
     is_punctuation_char,
@@ -18,12 +18,11 @@ from pana.tui.utils import (
     visible_width,
 )
 
-
 PROMPT = "> "
 PROMPT_WIDTH = visible_width(PROMPT)
 
-_PASTE_START = "\x1b[200~"
-_PASTE_END = "\x1b[201~"
+_PASTE_START = ANSI.PASTE_START
+_PASTE_END = ANSI.PASTE_END
 
 
 class _UndoState(TypedDict):
@@ -456,10 +455,10 @@ class Input:
 
         # Render the cursor character
         display_cursor_char = cursor_char if cursor_char else " "
-        cursor_rendered = f"\x1b[7m{display_cursor_char}\x1b[27m"
+        cursor_rendered = f"{ANSI.INVERSE_ON}{display_cursor_char}{ANSI.INVERSE_OFF}"
 
         # Assemble
-        cursor_marker = CURSOR_MARKER if self.focused else ""
+        cursor_marker = ANSI.CURSOR_MARKER if self.focused else ""
         line_content = before_text + cursor_marker + cursor_rendered + after_text
 
         # Pad to fill content width

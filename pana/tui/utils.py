@@ -8,6 +8,8 @@ from typing import Callable
 import grapheme
 import wcwidth
 
+from pana.tui.ansi import ANSI
+
 _WHITESPACE_RE = re.compile(r"\s")
 _PUNCTUATION_CATS = frozenset({"Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps", "Sc", "Sk", "Sm", "So"})
 
@@ -139,21 +141,21 @@ class AnsiCodeTracker:
             if p == 0:
                 self.clear()
             elif p == 1:
-                self.bold = "\x1b[1m"
+                self.bold = ANSI.BOLD_ON
             elif p == 2:
-                self.dim = "\x1b[2m"
+                self.dim = ANSI.DIM_ON
             elif p == 3:
-                self.italic = "\x1b[3m"
+                self.italic = ANSI.ITALIC_ON
             elif p == 4:
-                self.underline = "\x1b[4m"
+                self.underline = ANSI.UNDERLINE_ON
             elif p == 5:
-                self.blink = "\x1b[5m"
+                self.blink = ANSI.BLINK_ON
             elif p == 7:
-                self.inverse = "\x1b[7m"
+                self.inverse = ANSI.INVERSE_ON
             elif p == 8:
-                self.hidden = "\x1b[8m"
+                self.hidden = ANSI.HIDDEN_ON
             elif p == 9:
-                self.strikethrough = "\x1b[9m"
+                self.strikethrough = ANSI.STRIKETHROUGH_ON
             elif p == 21:
                 self.bold = None
             elif p == 22:
@@ -237,7 +239,7 @@ class AnsiCodeTracker:
 
     def get_line_end_reset(self) -> str:
         if self.underline is not None:
-            return "\x1b[24m"
+            return ANSI.UNDERLINE_OFF
         return ""
 
 
@@ -317,7 +319,7 @@ def wrap_text_with_ansi(text: str, width: int) -> list[str]:
                 else:
                     # wrap
                     if tracker.has_active_codes():
-                        current_line += tracker.get_line_end_reset() + "\x1b[0m"
+                        current_line += tracker.get_line_end_reset() + ANSI.RESET
                     lines.append(current_line)
                     current_line = tracker.get_active_codes()
                     current_width = 0
@@ -329,7 +331,7 @@ def wrap_text_with_ansi(text: str, width: int) -> list[str]:
             elif token_width <= width:
                 # Word fits on a new line
                 if tracker.has_active_codes():
-                    current_line += tracker.get_line_end_reset() + "\x1b[0m"
+                    current_line += tracker.get_line_end_reset() + ANSI.RESET
                 lines.append(current_line)
                 current_line = tracker.get_active_codes() + token
                 current_width = token_width
@@ -342,7 +344,7 @@ def wrap_text_with_ansi(text: str, width: int) -> list[str]:
                         current_width += visible_width(part)
                     else:
                         if tracker.has_active_codes():
-                            current_line += tracker.get_line_end_reset() + "\x1b[0m"
+                            current_line += tracker.get_line_end_reset() + ANSI.RESET
                         lines.append(current_line)
                         current_line = tracker.get_active_codes() + part
                         current_width = visible_width(part)
@@ -358,7 +360,7 @@ def wrap_text_with_ansi(text: str, width: int) -> list[str]:
                     ti += 1
 
         if tracker.has_active_codes():
-            current_line += tracker.get_line_end_reset() + "\x1b[0m"
+            current_line += tracker.get_line_end_reset() + ANSI.RESET
         lines.append(current_line)
         result.extend(lines)
 
@@ -377,7 +379,7 @@ def apply_background_to_line(line: str, width: int, bg_fn: Callable[[str], str])
     if m:
         bg_code = m.group(1)
         # Re-inject bg_code after every full reset (\x1b[0m) inside content
-        content = content.replace("\x1b[0m", "\x1b[0m" + bg_code)
+        content = content.replace(ANSI.RESET, ANSI.RESET + bg_code)
 
     return bg_fn(content)
 

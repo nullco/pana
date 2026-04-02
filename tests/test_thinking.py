@@ -14,8 +14,9 @@ from pana.agents.agent import (
     ToolCallUpdateEvent,
     ToolResultEvent,
 )
-from pana.app.theme import italic as _italic, thinking_text as _thinking_text
 from pana.app.commands import default_registry
+from pana.app.theme import italic as _italic
+from pana.app.theme import thinking_text as _thinking_text
 from pana.state import State
 from pana.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
 from pana.tui.components.spacer import Spacer

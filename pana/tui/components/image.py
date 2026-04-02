@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+from pana.tui.ansi import ANSI
 from pana.tui.terminal_image import (
     ImageDimensions,
     ImageRenderOptions,
@@ -89,7 +90,7 @@ class Image:
                 lines: list[str] = []
                 for _ in range(result.rows - 1):
                     lines.append("")
-                move_up = f"\x1b[{result.rows - 1}A" if result.rows > 1 else ""
+                move_up = ANSI.cursor_up(result.rows - 1) if result.rows > 1 else ""
                 lines.append(move_up + result.sequence)
             else:
                 fallback = image_fallback(

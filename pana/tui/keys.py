@@ -15,7 +15,6 @@ from __future__ import annotations
 import os
 import re
 
-
 _kitty_protocol_active = False
 
 

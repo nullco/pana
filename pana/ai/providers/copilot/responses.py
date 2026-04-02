@@ -18,12 +18,12 @@ from dataclasses import dataclass, field
 
 from openai.types import responses
 from pydantic_ai.messages import ModelResponseStreamEvent
+from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.models.openai import (
     OpenAIResponsesModel,
     OpenAIResponsesModelSettings,
     OpenAIResponsesStreamedResponse,
 )
-from pydantic_ai.models import ModelRequestParameters
 
 
 @dataclass

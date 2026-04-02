@@ -14,7 +14,6 @@ from typing import Any
 
 from pana.tui.keys import matches_key
 
-
 TUI_KEYBINDINGS: dict[str, dict[str, Any]] = {
     # Editor — cursor movement
     "tui.editor.cursorUp":        {"defaultKeys": "up",                              "description": "Move cursor up"},

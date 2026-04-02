@@ -1,6 +1,5 @@
 """Tests for AGENTS.md discovery and collection."""
 
-from pathlib import Path
 
 from pana.agents.context import collect_agents_md, find_project_root
 

@@ -4,7 +4,16 @@ from __future__ import annotations
 import difflib
 import re
 
-from pana.app.theme import accent, bold, diff_added, diff_context, diff_removed, error, inverse, muted
+from pana.app.theme import (
+    accent,
+    bold,
+    diff_added,
+    diff_context,
+    diff_removed,
+    error,
+    inverse,
+    muted,
+)
 from pana.app.tool_renderer.base import shorten_path
 
 

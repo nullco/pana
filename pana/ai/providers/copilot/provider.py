@@ -7,7 +7,6 @@ from pydantic_ai.profiles.openai import openai_model_profile
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from pana.ai.providers.copilot.responses import CopilotResponsesModel
-
 from pana.ai.providers.model import Model
 from pana.ai.providers.provider import Provider
 from pana.state import state

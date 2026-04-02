@@ -9,7 +9,6 @@ import struct
 from dataclasses import dataclass
 from typing import Literal
 
-
 ImageProtocol = Literal["kitty", "iterm2"] | None
 
 
