@@ -18,7 +18,7 @@ class SettingItem:
     current_value: str
     description: str | None = None
     values: list[str] | None = None
-    submenu: Callable[[str, Callable], Any] | None = None
+    submenu: Callable[[str, Callable[[str | None], Awaitable[None]]], Any] | None = None
 
 
 @dataclass
@@ -36,7 +36,7 @@ class SettingsList:
         items: list[SettingItem],
         max_visible: int,
         theme: SettingsListTheme,
-        on_change: Callable[[str, str], None],
+        on_change: Callable[[str, str], Awaitable[None]],
         on_cancel: Callable[[], Awaitable[None]],
         *,
         enable_search: bool = False,
@@ -145,17 +145,17 @@ class SettingsList:
                     0 if self._selected_index == len(display) - 1 else self._selected_index + 1
                 )
         elif kb.matches(data, "tui.select.confirm") or data == " ":
-            self._activate_item()
+            await self._activate_item()
         elif kb.matches(data, "tui.select.cancel"):
             await self._on_cancel()
         elif self._search_enabled and self._search_input:
             sanitized = data.replace(" ", "")
             if not sanitized:
                 return
-                await self._search_input.handle_input(sanitized)
+            await self._search_input.handle_input(sanitized)
             self._apply_filter(self._search_input.get_value())
 
-    def _activate_item(self) -> None:
+    async def _activate_item(self) -> None:
         display = self._filtered_items if self._search_enabled else self._items
         if self._selected_index >= len(display):
             return
@@ -164,10 +164,10 @@ class SettingsList:
         if item.submenu:
             self._submenu_item_index = self._selected_index
 
-            def done(selected_value: str | None = None) -> None:
+            async def done(selected_value: str | None = None) -> None:
                 if selected_value is not None:
                     item.current_value = selected_value
-                    self._on_change(item.id, selected_value)
+                    await self._on_change(item.id, selected_value)
                 self._close_submenu()
 
             self._submenu_component = item.submenu(item.current_value, done)
@@ -175,7 +175,7 @@ class SettingsList:
             idx = item.values.index(item.current_value) if item.current_value in item.values else -1
             new_idx = (idx + 1) % len(item.values)
             item.current_value = item.values[new_idx]
-            self._on_change(item.id, item.current_value)
+            await self._on_change(item.id, item.current_value)
 
     def _close_submenu(self) -> None:
         self._submenu_component = None

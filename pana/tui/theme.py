@@ -252,8 +252,6 @@ _SYNTAX_KEYS = (
     "syntaxString", "syntaxNumber", "syntaxType", "syntaxOperator", "syntaxPunctuation",
 )
 
-_BG_KEYS = frozenset(("userMessageBg", "toolPendingBg", "toolSuccessBg", "toolErrorBg"))
-
 
 def load_theme_file(path: Path) -> PanaTheme:
     """Parse a theme JSON file and return a fully-resolved :class:`PanaTheme`.

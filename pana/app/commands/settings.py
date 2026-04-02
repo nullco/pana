@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable
 from typing import Callable
 
 from pana.agents.agent import THINKING_LEVELS
@@ -26,7 +27,7 @@ class SettingsCommand(Command):
 
         def _theme_submenu(
             current_value: str,
-            done: Callable[[str | None], None],
+            done: Callable[[str | None], Awaitable[None]],
         ) -> SelectList:
             """Build a SelectList of all discoverable themes."""
             theme_paths = discover_themes()
@@ -44,10 +45,10 @@ class SettingsCommand(Command):
             select = SelectList(sel_items, 8, ui_themes.select_list_theme, searchable=True)
 
             async def on_select(item: SelectItem) -> None:
-                done(item.value)
+                await done(item.value)
 
             async def on_cancel() -> None:
-                done(None)
+                await done(None)
 
             select.on_select = on_select
             select.on_cancel = on_cancel
@@ -81,7 +82,7 @@ class SettingsCommand(Command):
             ),
         ]
 
-        def on_change(setting_id: str, value: str) -> None:
+        async def on_change(setting_id: str, value: str) -> None:
             if setting_id == "thinking_level":
                 state.set("thinking_level", value)
                 if ctx.agent is not None:

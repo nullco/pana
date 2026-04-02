@@ -11,7 +11,7 @@ import asyncio
 import logging
 import os
 import pathlib
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -254,7 +254,10 @@ class TUI(Container):
         self._focus_order_counter: int = 0
 
         # Input listeners — each may return {"consume": True} or {"data": "..."}
-        self._input_listeners: list[Callable[[str], dict | None]] = []
+        # Listeners may be sync or async; async ones are awaited in _dispatch_key.
+        self._input_listeners: list[
+            Callable[[str], Awaitable[dict | None] | dict | None]
+        ] = []
 
         # Debug callbacks
         self.on_debug: Callable[[], None] | None = None
@@ -322,7 +325,7 @@ class TUI(Container):
 
 
     def add_input_listener(
-        self, listener: Callable[[str], dict | None]
+        self, listener: Callable[[str], Awaitable[dict | None] | dict | None]
     ) -> Callable[[], None]:
         """Register *listener* and return a cleanup callable.
 
@@ -330,6 +333,10 @@ class TUI(Container):
           None              – pass through unchanged.
           {"consume": True} – stop dispatching this event entirely.
           {"data": "..."}   – replace the data for subsequent listeners.
+
+        Listeners may be either sync or async.  Async listeners (those whose
+        return value is a coroutine) are automatically awaited before the
+        result is inspected.
         """
         self._input_listeners.append(listener)
 
@@ -341,7 +348,9 @@ class TUI(Container):
 
         return _remove
 
-    def remove_input_listener(self, listener: Callable[[str], dict | None]) -> None:
+    def remove_input_listener(
+        self, listener: Callable[[str], Awaitable[dict | None] | dict | None]
+    ) -> None:
         try:
             self._input_listeners.remove(listener)
         except ValueError:
@@ -549,6 +558,8 @@ class TUI(Container):
             current = data
             for listener in list(self._input_listeners):
                 result = listener(current)
+                if asyncio.iscoroutine(result):
+                    result = await result
                 if result:
                     if result.get("consume"):
                         return

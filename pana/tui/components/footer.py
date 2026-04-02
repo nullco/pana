@@ -6,21 +6,24 @@ Mirrors the FooterComponent from the original pi-tui coding agent:
 """
 from __future__ import annotations
 
+import asyncio
 import os
-import subprocess
 from collections.abc import Callable
 
 from pana.tui.utils import truncate_to_width, visible_width
 
 
-def _get_git_branch() -> str | None:
+async def _get_git_branch_async() -> str | None:
+    """Return the current git branch name asynchronously, or None on failure."""
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=2,
+        proc = await asyncio.create_subprocess_exec(
+            "git", "rev-parse", "--abbrev-ref", "HEAD",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        if result.returncode == 0:
-            return result.stdout.strip()
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=2.0)
+        if proc.returncode == 0:
+            return stdout.decode().strip()
     except Exception:
         pass
     return None
@@ -34,7 +37,24 @@ class Footer:
         self._model_name: str | None = None
         self._provider_name: str | None = None
         self._thinking_level: str | None = None
-        self._cached_branch: str | None = _get_git_branch()
+        self._cached_branch: str | None = None
+        self._refresh_pending: bool = False
+        self._schedule_branch_refresh()
+
+    def _schedule_branch_refresh(self) -> None:
+        """Schedule an async branch refresh if an event loop is running."""
+        if self._refresh_pending:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            self._refresh_pending = True
+            loop.create_task(self._refresh_branch())
+        except RuntimeError:
+            pass  # No running loop — branch will stay None until the loop starts.
+
+    async def _refresh_branch(self) -> None:
+        self._cached_branch = await _get_git_branch_async()
+        self._refresh_pending = False
 
     def set_model(self, model_name: str | None, provider_name: str | None) -> None:
         self._model_name = model_name
@@ -44,7 +64,7 @@ class Footer:
         self._thinking_level = level
 
     def invalidate(self) -> None:
-        self._cached_branch = _get_git_branch()
+        self._schedule_branch_refresh()
 
     def render(self, width: int) -> list[str]:
         # Line 1: cwd (+ branch)
