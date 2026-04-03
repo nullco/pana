@@ -11,13 +11,13 @@ or loaded explicitly with the ``-e`` / ``--extension`` CLI flag.
 
 Each extension must export a ``setup(pana: ExtensionAPI)`` function::
 
-    from pana.extensions import ExtensionAPI, ToolDefinition, CommandDefinition
+    from pana.app.extensions import ExtensionAPI, ToolDefinition, CommandDefinition
 
     def setup(pana: ExtensionAPI) -> None:
         pana.on("session_start", lambda event, ctx: ctx.ui.notify("Loaded!"))
 """
 
-from pana.extensions.api import (
+from pana.app.extensions.api import (
     AgentEndEvent,
     AgentStartEvent,
     BeforeAgentStartEvent,
@@ -34,8 +34,8 @@ from pana.extensions.api import (
     TurnEndEvent,
     TurnStartEvent,
 )
-from pana.extensions.loader import discover_extension_paths, load_extension
-from pana.extensions.manager import ExtensionManager
+from pana.app.extensions.loader import discover_extension_paths, load_extension
+from pana.app.extensions.manager import ExtensionManager
 
 __all__ = [
     # API

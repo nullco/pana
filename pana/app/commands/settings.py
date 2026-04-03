@@ -9,7 +9,7 @@ from pana.agents.agent import THINKING_LEVELS
 from pana.app import theme as _theme
 from pana.app import ui_themes
 from pana.app.commands.base import Command
-from pana.tui.tui import UIContext
+from pana.app.context import UIContext
 from pana.state import state
 from pana.tui.components.select_list import SelectItem, SelectList
 from pana.tui.components.settings_list import SettingItem, SettingsList

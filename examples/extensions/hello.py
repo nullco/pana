@@ -8,7 +8,7 @@ Or load it with:
   pana -e ./examples/extensions/hello.py
 """
 
-from pana.extensions.api import CommandDefinition, ExtensionAPI, ToolDefinition
+from pana.app.extensions.api import CommandDefinition, ExtensionAPI, ToolDefinition
 
 
 def setup(pana: ExtensionAPI) -> None:

@@ -26,13 +26,13 @@ import logging
 from pathlib import Path
 from typing import Any, Callable
 
-from pana.extensions.api import (
+from pana.app.context import UIContext
+from pana.app.extensions.api import (
     CommandDefinition,
     ExtensionAPI,
     ExtensionContext,
     ToolDefinition,
 )
-from pana.tui.tui import UIContext
 
 logger = logging.getLogger(__name__)
 
@@ -261,13 +261,13 @@ class ExtensionManager:
 
 
 def _make_tool_call_event(tool_name: str, kwargs: dict) -> object:
-    from pana.extensions.api import ToolCallEvent
+    from pana.app.extensions.api import ToolCallEvent
 
     return ToolCallEvent(tool_name=tool_name, input=dict(kwargs))
 
 
 def _make_tool_result_event(tool_name: str, kwargs: dict, content: str) -> object:
-    from pana.extensions.api import ToolResultEvent
+    from pana.app.extensions.api import ToolResultEvent
 
     return ToolResultEvent(
         tool_name=tool_name,

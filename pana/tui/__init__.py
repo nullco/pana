@@ -80,7 +80,6 @@ from pana.tui.tui import (
     OverlayHandle,
     OverlayMargin,
     OverlayOptions,
-    UIContext,
     is_focusable,
 )
 from pana.tui.utils import truncate_to_width, visible_width, wrap_text_with_ansi
@@ -175,7 +174,6 @@ __all__ = [
     "OverlayMargin",
     "OverlayOptions",
     "TUI",
-    "UIContext",
     "is_focusable",
     # utils
     "truncate_to_width",

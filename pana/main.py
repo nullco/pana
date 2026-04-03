@@ -13,9 +13,7 @@ from pana.app import theme as _theme
 from pana.app import ui_themes
 from pana.app.chat_themes import editor_theme
 from pana.app.commands import default_registry
-from pana.app.input_processing import strip_at_prefixes
-from pana.app.stream_handler import StreamRenderer
-from pana.extensions import (
+from pana.app.extensions import (
     ExtensionAPI,
     ExtensionManager,
     InputEvent,
@@ -24,6 +22,8 @@ from pana.extensions import (
     discover_extension_paths,
     load_extension,
 )
+from pana.app.input_processing import strip_at_prefixes
+from pana.app.stream_handler import StreamRenderer
 from pana.state import state
 from pana.tui.autocomplete import CombinedAutocompleteProvider, SlashCommand
 from pana.tui.components.cancellable_loader import CancellableLoader
@@ -269,7 +269,7 @@ class PanaApp:
 
         # Fire before_agent_start — extensions may inject extra system-prompt text
         if self._extension_manager and self._extension_manager.has_extensions:
-            from pana.extensions.api import BeforeAgentStartEvent
+            from pana.app.extensions.api import BeforeAgentStartEvent
             ext_ctx = self._extension_manager.make_context()
             before_event = BeforeAgentStartEvent(prompt=user_text)
             result = await self._extension_manager.emit(

@@ -5,7 +5,7 @@ from pana.ai.providers.factory import get_provider, get_providers
 from pana.app import theme as _theme
 from pana.app import ui_themes
 from pana.app.commands.base import Command
-from pana.tui.tui import UIContext
+from pana.app.context import UIContext
 from pana.tui.components.select_list import SelectItem, SelectList
 from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text

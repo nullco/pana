@@ -2,7 +2,7 @@
 
 Extension authors import from this module::
 
-    from pana.extensions.api import ExtensionAPI, ExtensionContext, ToolDefinition, CommandDefinition
+    from pana.app.extensions.api import ExtensionAPI, ExtensionContext, ToolDefinition, CommandDefinition
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 if TYPE_CHECKING:
-    from pana.tui.tui import UIContext
+    from pana.app.context import UIContext
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class ExtensionContext:
 
     Attributes:
         cwd:    Current working directory.
-        ui:     Full UI context (see :class:`~pana.tui.tui.UIContext`).
+        ui:     Full UI context (see :class:`~pana.app.context.UIContext`).
         signal: The active agent cancellation event, or ``None`` outside a run.
     """
 
@@ -207,7 +207,7 @@ class ExtensionAPI:
 
     Example extension (``~/.pana/extensions/my_ext.py``)::
 
-        from pana.extensions.api import ExtensionAPI, ToolDefinition, CommandDefinition
+        from pana.app.extensions.api import ExtensionAPI, ToolDefinition, CommandDefinition
 
         def setup(pana: ExtensionAPI) -> None:
             @pana.on("session_start")

@@ -20,7 +20,7 @@ from pana.agents.tools import tool_bash, tool_edit, tool_read, tool_write
 from pana.ai.providers.model import Model
 
 if TYPE_CHECKING:
-    from pana.extensions.manager import ExtensionManager
+    from pana.app.extensions.manager import ExtensionManager
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +224,7 @@ class Agent:
 
         try:
             if ext and ext_ctx:
-                from pana.extensions.api import AgentStartEvent
+                from pana.app.extensions.api import AgentStartEvent
                 await ext.emit("agent_start", AgentStartEvent(prompt=user_input), ext_ctx)
 
             turn_index = 0
@@ -240,7 +240,7 @@ class Agent:
                             break
                         if isinstance(node, ModelRequestNode):
                             if ext and ext_ctx:
-                                from pana.extensions.api import TurnStartEvent
+                                from pana.app.extensions.api import TurnStartEvent
                                 await ext.emit(
                                     "turn_start",
                                     TurnStartEvent(turn_index=turn_index),
@@ -254,7 +254,7 @@ class Agent:
                                 node, agent_run, state, event_handler
                             )
                             if ext and ext_ctx:
-                                from pana.extensions.api import TurnEndEvent
+                                from pana.app.extensions.api import TurnEndEvent
                                 await ext.emit(
                                     "turn_end",
                                     TurnEndEvent(turn_index=turn_index),
@@ -267,7 +267,7 @@ class Agent:
                     self._message_history = agent_run.all_messages()
 
             if ext and ext_ctx:
-                from pana.extensions.api import AgentEndEvent
+                from pana.app.extensions.api import AgentEndEvent
                 await ext.emit("agent_end", AgentEndEvent(prompt=user_input), ext_ctx)
 
         finally:

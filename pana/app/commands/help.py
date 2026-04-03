@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pana.app import theme as _theme
 from pana.app.commands.base import Command
-from pana.tui.tui import UIContext
+from pana.app.context import UIContext
 from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 

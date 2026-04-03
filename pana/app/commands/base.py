@@ -3,7 +3,7 @@
 Third-party code only needs to import from this module to add new commands:
 
     from pana.app.commands.base import Command
-    from pana.tui.tui import UIContext
+    from pana.app.context import UIContext
 
     class MyCommand(Command):
         name = "mycommand"
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from pana.tui.tui import UIContext
+from pana.app.context import UIContext
 
 
 class Command(ABC):

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pana.app.commands.base import Command
-from pana.tui.tui import UIContext
+from pana.app.context import UIContext
 
 
 class QuitCommand(Command):

@@ -5,7 +5,7 @@ code can register additional commands there::
 
     from pana.app.commands import default_registry
     from pana.app.commands.base import Command
-    from pana.tui.tui import UIContext
+    from pana.app.context import UIContext
 
     class GreetCommand(Command):
         name = "greet"
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from pana.app.commands.base import Command
 from pana.app.commands.registry import CommandRegistry
-from pana.tui.tui import UIContext
+from pana.app.context import UIContext
 
 # Avoid importing the concrete command modules at the top level so that the
 # package stays importable even when optional dependencies are missing.  The

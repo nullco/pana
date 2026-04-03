@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 
 from pana.app.commands.base import Command
-from pana.tui.tui import UIContext
+from pana.app.context import UIContext
 
 logger = logging.getLogger(__name__)
 
