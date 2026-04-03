@@ -33,6 +33,7 @@ from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 from pana.tui.components.user_message import UserMessage
 from pana.tui.terminal import ProcessTerminal
+from pana.tui.theme import PanaTheme
 from pana.tui.tui import TUI, Container
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,10 @@ class PanaApp:
         """Set thinking-block visibility and persist it to state."""
         self.hide_thinking_block = value
         state.set("hide_thinking_block", value)
+
+    def get_theme(self) -> PanaTheme:
+        """Return the currently active :class:`~pana.tui.theme.PanaTheme`."""
+        return _theme.get_current_theme()
 
     def notify(self, message: str, level: str = "info") -> None:
         """Display a notification message in the chat area (used by extensions)."""

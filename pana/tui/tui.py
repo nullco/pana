@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from pana.tui.ansi import ANSI
 from pana.tui.keys import is_key_release, matches_key
 from pana.tui.terminal import Terminal
+from pana.tui.theme import PanaTheme
 
 if TYPE_CHECKING:
     from pana.agents.agent import Agent
@@ -81,6 +82,8 @@ class UIContext(Protocol):
     def set_hide_thinking_block(self, value: bool) -> None: ...
 
     def notify(self, message: str, level: str = "info") -> None: ...
+
+    def get_theme(self) -> PanaTheme: ...
 
 
 
