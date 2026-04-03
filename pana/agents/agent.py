@@ -10,6 +10,7 @@ from pydantic_ai.agent import Agent as PydanticAgent
 from pydantic_ai.messages import TextPart, ThinkingPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.settings import ModelSettings
 
+from pana.agents.skills import Skill, discover_skills
 from pana.agents.system_prompt import build_system_prompt
 from pana.agents.tool_streams import (
     ToolStreamHandler,
@@ -107,15 +108,18 @@ class Agent:
         model: Model,
         thinking_level: str = "medium",
         extension_manager: "ExtensionManager | None" = None,
+        skills: list[Skill] | None = None,
     ) -> None:
         self._model = model
         self._thinking_level = thinking_level
         self._extension_manager = extension_manager
+        self._skills = skills if skills is not None else discover_skills()
         self._extra_system_prompt: str | None = None
         self._current_cancel_event: asyncio.Event | None = None
         self._message_history = None
         self._system_prompt = build_system_prompt(
-            extra_tool_snippets=self._get_extension_tool_snippets()
+            extra_tool_snippets=self._get_extension_tool_snippets(),
+            skills=self._skills,
         )
         self._agent = self._build_agent()
 
@@ -141,7 +145,8 @@ class Agent:
 
     def _build_agent(self) -> PydanticAgent:
         base_prompt = build_system_prompt(
-            extra_tool_snippets=self._get_extension_tool_snippets()
+            extra_tool_snippets=self._get_extension_tool_snippets(),
+            skills=self._skills,
         )
         if self._extra_system_prompt:
             system_prompt = f"{base_prompt}\n\n{self._extra_system_prompt.strip()}"

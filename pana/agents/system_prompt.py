@@ -15,6 +15,7 @@ from datetime import date
 from pathlib import Path
 
 from pana.agents.context import collect_agents_md
+from pana.agents.skills import Skill, build_skills_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ def build_system_prompt(
     append_prompt: str | None = None,
     cwd: Path | None = None,
     extra_tool_snippets: dict[str, str] | None = None,
+    skills: list[Skill] | None = None,
 ) -> str:
     """Build the full system prompt for the pana agent.
 
@@ -68,6 +70,7 @@ def build_system_prompt(
         cwd: Working directory to embed. Defaults to ``Path.cwd()``.
         extra_tool_snippets: Additional ``{name: description}`` entries from
             extension-registered tools, appended after the built-in snippets.
+        skills: Discovered Agent Skills to include in the prompt catalog.
 
     Returns:
         The fully rendered system prompt string.
@@ -101,6 +104,10 @@ def build_system_prompt(
         "\n"
         f"Guidelines:\n{guidelines_block}"
     )
+
+    skills_catalog = build_skills_catalog(skills or [])
+    if skills_catalog:
+        prompt += f"\n\n{skills_catalog}"
 
     if append_prompt:
         prompt += f"\n\n{append_prompt.strip()}"
