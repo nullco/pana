@@ -39,14 +39,13 @@ Code: {response.user_code}""")
                 await handler("[OAuth] Login successful!")
             except asyncio.CancelledError:
                 await handler("[OAuth] Login cancelled.")
+            except Exception as e:
+                await handler(f"[OAuth] Login failed: {e}")
 
         asyncio.create_task(poll())
 
     def is_authenticated(self) -> bool:
-        access_token = state.get("copilot.access_token")
-        if not access_token:
-            return False
-        return True
+        return bool(state.get("copilot.github_access_token"))
 
     def should_reauthenticate(self) -> bool:
         expires_ms = state.get("copilot.expires_ms")
@@ -55,18 +54,17 @@ Code: {response.user_code}""")
         return expires_ms - int(time.time() * 1000) < 5 * 60 * 1000
 
     async def reauthenticate(self):
-        access_token = state.get("copilot.github_access_token")
-        if not access_token:
+        github_token = state.get("copilot.github_access_token")
+        if not github_token:
             return
-        credentials = await asyncio.to_thread(exchange_for_copilot_token, access_token)
-        state.set("copilot.github_access_token", credentials.github_token)
+        credentials = await asyncio.to_thread(exchange_for_copilot_token, github_token)
         state.set("copilot.access_token", credentials.copilot_token)
         state.set("copilot.expires_ms", credentials.expires_ms)
 
     async def build_model(self, model_name: str) -> Model:
         access_token = state.get("copilot.access_token")
         if not access_token:
-            raise ValueError("You need to authenticate first")
+            raise ValueError("Copilot token exchange failed — check your GitHub Copilot subscription")
 
         base_url = get_copilot_base_url(access_token)
 

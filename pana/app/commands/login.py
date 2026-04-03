@@ -29,15 +29,12 @@ class LoginCommand(Command):
 
         async def on_select(item: SelectItem) -> None:
             restore()
+
+            async def handler(message: str) -> None:
+                ctx.add_message(Text(_theme.muted(message), padding_x=1, padding_y=0))
+
             try:
-                await get_provider(item.value).authenticate(lambda result: None)
-                ctx.add_message(
-                    Text(
-                        _theme.success(f"Authenticated with {item.value}."),
-                        padding_x=1,
-                        padding_y=0,
-                    )
-                )
+                await get_provider(item.value).authenticate(handler)
             except Exception as e:
                 ctx.add_message(Text(_theme.error(f"Auth failed: {e}"), padding_x=1, padding_y=0))
             ctx.add_message(Spacer(1))

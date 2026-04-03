@@ -147,32 +147,23 @@ def exchange_for_copilot_token(github_token: str) -> CopilotCredentials:
     try:
         resp = requests.get(COPILOT_TOKEN_URL, headers=headers, timeout=10)
     except requests.RequestException as e:
-        logger.warning("Failed to exchange for Copilot token: %s", e)
-        return CopilotCredentials(
-            github_token=github_token, copilot_token=None, expires_ms=None
-        )
+        raise OAuthError(f"Copilot token request failed: {e}") from e
 
     if resp.status_code != 200:
-        logger.debug("Copilot token exchange returned %d", resp.status_code)
-        return CopilotCredentials(
-            github_token=github_token, copilot_token=None, expires_ms=None
+        raise OAuthError(
+            f"Copilot token exchange returned {resp.status_code}: {resp.text}"
         )
 
     try:
         data = resp.json()
     except Exception as e:
-        logger.warning("Failed to parse Copilot token response: %s", e)
-        return CopilotCredentials(
-            github_token=github_token, copilot_token=None, expires_ms=None
-        )
+        raise OAuthError(f"Failed to parse Copilot token response: {e}") from e
 
     token = data.get("token")
     expires_at = data.get("expires_at")
 
     if not isinstance(token, str):
-        return CopilotCredentials(
-            github_token=github_token, copilot_token=None, expires_ms=None
-        )
+        raise OAuthError(f"Copilot token response missing 'token' field: {data}")
 
     expires_ms = None
     if isinstance(expires_at, (int, float)):
