@@ -104,6 +104,9 @@ class _FixedComponent:
     def render(self, width: int) -> list[str]:
         return list(self.lines)
 
+    def invalidate(self) -> None:
+        pass
+
 
 def _setup_tui(term: StubTerminal, content_lines: list[str]) -> TUI:
     """Create a TUI, do the initial render, and clear write history."""

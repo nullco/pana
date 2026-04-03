@@ -17,3 +17,4 @@ uv run pytest
 * Do not preserve backward compatibility unless the user explicitly asks for it
 * Use descriptive variable and function names.
 * Avoid inline imports; keep imports at the top of the file.
+* If you find lint warnings, fix them immediately via ruff

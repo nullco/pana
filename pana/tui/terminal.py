@@ -72,7 +72,7 @@ class ProcessTerminal:
         self._on_input: Callable[[str], None] | None = None  # points to queue.put_nowait; set None during drain
         self._on_resize: Callable[[], None] | None = None
         self._input_queue: asyncio.Queue[str | None] = asyncio.Queue()
-        self._prev_sigwinch: signal.Handlers | None = None
+        self._sigwinch_registered: bool = False
         self._stdin_fd: int | None = None
         self._kitty_protocol_active: bool = False
         self._modify_other_keys_active: bool = False
@@ -100,15 +100,15 @@ class ProcessTerminal:
         tty.setraw(fd)
         self.write(ANSI.BRACKETED_PASTE_ON)
 
-        self._prev_sigwinch = signal.getsignal(signal.SIGWINCH)
-        signal.signal(signal.SIGWINCH, self._handle_sigwinch)
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGWINCH, self._handle_sigwinch)
+        self._sigwinch_registered = True
 
         self._setup_stdin_buffer()
         self._query_and_enable_kitty_protocol()
 
         self._on_input = self._input_queue.put_nowait
 
-        loop = asyncio.get_running_loop()
         loop.add_reader(fd, self._read_stdin)
 
     def stop(self) -> None:
@@ -151,9 +151,13 @@ class ProcessTerminal:
 
             self._stdin_fd = None
 
-        if self._prev_sigwinch is not None:
-            signal.signal(signal.SIGWINCH, self._prev_sigwinch)
-            self._prev_sigwinch = None
+        if self._sigwinch_registered:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.remove_signal_handler(signal.SIGWINCH)
+            except RuntimeError:
+                pass
+            self._sigwinch_registered = False
 
         self._on_input = None
         self._on_resize = None
@@ -250,7 +254,7 @@ class ProcessTerminal:
                 self._stdin_buffer.on_data = prev_on_data
             self._on_input = saved_handler
 
-    def _handle_sigwinch(self, _signum: int, _frame: object) -> None:
+    def _handle_sigwinch(self) -> None:
         if self._on_resize is not None:
             self._on_resize()
 
