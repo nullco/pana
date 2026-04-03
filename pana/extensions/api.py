@@ -11,7 +11,10 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Coroutine
+from typing import TYPE_CHECKING, Any, Callable, Coroutine
+
+if TYPE_CHECKING:
+    from pana.tui.tui import UIContext
 
 logger = logging.getLogger(__name__)
 
@@ -77,27 +80,6 @@ class CommandDefinition:
 
 
 # ---------------------------------------------------------------------------
-# UI context
-# ---------------------------------------------------------------------------
-
-
-class UIContext:
-    """UI helpers passed to extension event handlers."""
-
-    def __init__(self, notify_fn: Callable[[str, str], None]) -> None:
-        self._notify_fn = notify_fn
-
-    def notify(self, message: str, level: str = "info") -> None:
-        """Display a notification message in the TUI.
-
-        Args:
-            message: Text to display.
-            level: Severity — ``"info"``, ``"warning"``, or ``"error"``.
-        """
-        self._notify_fn(message, level)
-
-
-# ---------------------------------------------------------------------------
 # Extension context
 # ---------------------------------------------------------------------------
 
@@ -108,7 +90,7 @@ class ExtensionContext:
 
     Attributes:
         cwd:    Current working directory.
-        ui:     UI helpers (notify, etc.).
+        ui:     Full UI context (see :class:`~pana.tui.tui.UIContext`).
         signal: The active agent cancellation event, or ``None`` outside a run.
     """
 

@@ -8,7 +8,8 @@ from typing import Callable
 from pana.agents.agent import THINKING_LEVELS
 from pana.app import theme as _theme
 from pana.app import ui_themes
-from pana.app.commands.base import Command, CommandContext
+from pana.app.commands.base import Command
+from pana.tui.tui import UIContext
 from pana.state import state
 from pana.tui.components.select_list import SelectItem, SelectList
 from pana.tui.components.settings_list import SettingItem, SettingsList
@@ -22,7 +23,7 @@ class SettingsCommand(Command):
     aliases = []
     description = "Configure thinking level, display options, and theme"
 
-    async def execute(self, ctx: CommandContext, args: str) -> None:
+    async def execute(self, ctx: UIContext, args: str) -> None:
         current_theme_name = state.get("theme", "dark")
 
         def _theme_submenu(

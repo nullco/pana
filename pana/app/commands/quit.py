@@ -1,7 +1,8 @@
 """``/quit`` command — exits the application."""
 from __future__ import annotations
 
-from pana.app.commands.base import Command, CommandContext
+from pana.app.commands.base import Command
+from pana.tui.tui import UIContext
 
 
 class QuitCommand(Command):
@@ -9,5 +10,5 @@ class QuitCommand(Command):
     aliases = ["exit", "q"]
     description = "Exit"
 
-    async def execute(self, ctx: CommandContext, args: str) -> None:
+    async def execute(self, ctx: UIContext, args: str) -> None:
         ctx.stop()

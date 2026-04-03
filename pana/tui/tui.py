@@ -11,11 +11,14 @@ import os
 import pathlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pana.tui.ansi import ANSI
 from pana.tui.keys import is_key_release, matches_key
 from pana.tui.terminal import Terminal
+
+if TYPE_CHECKING:
+    from pana.agents.agent import Agent
 from pana.tui.terminal_image import (
     CellDimensions,
     get_capabilities,
@@ -43,6 +46,41 @@ class Focusable(Protocol):
 def is_focusable(component: object) -> bool:
     return isinstance(component, Focusable)
 
+
+@runtime_checkable
+class UIContext(Protocol):
+    """Protocol describing all public UI operations the application exposes.
+
+    Implemented by :class:`~pana.main.PanaApp`.  Extensions receive a
+    ``UIContext`` via :attr:`ExtensionContext.ui` so they can interact
+    with the full TUI without depending on a concrete class.
+    """
+
+    @property
+    def agent(self) -> Agent | None: ...
+
+    @property
+    def hide_thinking_block(self) -> bool: ...
+
+    def add_message(self, component: Any) -> None: ...
+
+    def show_selector(
+        self, component: Any, focus_target: Any | None = None
+    ) -> Callable[[], None]: ...
+
+    def update_footer(self) -> None: ...
+
+    def clear_chat(self) -> None: ...
+
+    def stop(self) -> None: ...
+
+    def request_render(self) -> None: ...
+
+    def set_agent(self, agent: "Agent") -> None: ...
+
+    def set_hide_thinking_block(self, value: bool) -> None: ...
+
+    def notify(self, message: str, level: str = "info") -> None: ...
 
 
 

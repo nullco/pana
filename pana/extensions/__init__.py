@@ -33,7 +33,6 @@ from pana.extensions.api import (
     ToolResultEvent,
     TurnEndEvent,
     TurnStartEvent,
-    UIContext,
 )
 from pana.extensions.loader import discover_extension_paths, load_extension
 from pana.extensions.manager import ExtensionManager
@@ -42,7 +41,6 @@ __all__ = [
     # API
     "ExtensionAPI",
     "ExtensionContext",
-    "UIContext",
     # Definitions
     "ToolDefinition",
     "CommandDefinition",

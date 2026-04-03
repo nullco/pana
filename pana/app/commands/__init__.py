@@ -4,13 +4,14 @@ Built-in commands are registered in :data:`default_registry`.  Third-party
 code can register additional commands there::
 
     from pana.app.commands import default_registry
-    from pana.app.commands.base import Command, CommandContext
+    from pana.app.commands.base import Command
+    from pana.tui.tui import UIContext
 
     class GreetCommand(Command):
         name = "greet"
         description = "Say hello"
 
-        async def execute(self, ctx: CommandContext, args: str) -> None:
+        async def execute(self, ctx: UIContext, args: str) -> None:
             from pana.tui.components.text import Text
             ctx.add_message(Text(f"Hello, {args or 'world'}!", padding_x=1, padding_y=0))
 
@@ -18,8 +19,9 @@ code can register additional commands there::
 """
 from __future__ import annotations
 
-from pana.app.commands.base import Command, CommandContext
+from pana.app.commands.base import Command
 from pana.app.commands.registry import CommandRegistry
+from pana.tui.tui import UIContext
 
 # Avoid importing the concrete command modules at the top level so that the
 # package stays importable even when optional dependencies are missing.  The
@@ -53,7 +55,7 @@ default_registry: CommandRegistry = _build_default_registry()
 
 __all__ = [
     "Command",
-    "CommandContext",
     "CommandRegistry",
+    "UIContext",
     "default_registry",
 ]

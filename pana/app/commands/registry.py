@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import logging
 
-from pana.app.commands.base import Command, CommandContext
+from pana.app.commands.base import Command
+from pana.tui.tui import UIContext
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ class CommandRegistry:
 
         return next(iter(matched.values())) if len(matched) == 1 else None
 
-    async def dispatch(self, text: str, ctx: CommandContext) -> bool:
+    async def dispatch(self, text: str, ctx: UIContext) -> bool:
         """Parse *text* as a slash command and execute it.
 
         Returns ``True`` when a command was found and executed, ``False``

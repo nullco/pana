@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from pana.app import theme as _theme
-from pana.app.commands.base import Command, CommandContext
+from pana.app.commands.base import Command
+from pana.tui.tui import UIContext
 from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 
@@ -18,7 +19,7 @@ class HelpCommand(Command):
     def __init__(self, registry: CommandRegistry) -> None:  # type: ignore[name-defined]
         self._registry = registry
 
-    async def execute(self, ctx: CommandContext, args: str) -> None:
+    async def execute(self, ctx: UIContext, args: str) -> None:
         lines = [_theme.bold("Commands:")]
         for cmd in self._registry.all_commands():
             name_col = f"/{cmd.name:<8}"

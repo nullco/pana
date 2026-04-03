@@ -31,8 +31,8 @@ from pana.extensions.api import (
     ExtensionAPI,
     ExtensionContext,
     ToolDefinition,
-    UIContext,
 )
+from pana.tui.tui import UIContext
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,8 @@ class ExtensionManager:
     and dispatches events to their registered handlers.
     """
 
-    def __init__(self, notify_fn: Callable[[str, str], None]) -> None:
-        self._notify_fn = notify_fn
+    def __init__(self, ui: UIContext) -> None:
+        self._ui = ui
         self._apis: list[ExtensionAPI] = []
 
     # ------------------------------------------------------------------
@@ -67,7 +67,7 @@ class ExtensionManager:
         """Create an :class:`~pana.extensions.api.ExtensionContext` for callbacks."""
         return ExtensionContext(
             cwd=str(Path.cwd()),
-            ui=UIContext(self._notify_fn),
+            ui=self._ui,
             signal=signal,
         )
 
@@ -283,7 +283,7 @@ def _make_ext_command(cmd_name: str, defn: "CommandDefinition", manager: "Extens
     The class is built dynamically so that ``execute`` is defined *inside* the
     class body, satisfying Python's ABCMeta abstract-method check.
     """
-    from pana.app.commands.base import Command, CommandContext
+    from pana.app.commands.base import Command
 
     _handler = defn.handler
     _manager = manager
@@ -292,7 +292,7 @@ def _make_ext_command(cmd_name: str, defn: "CommandDefinition", manager: "Extens
         name = cmd_name
         description = defn.description
 
-        async def execute(self, ctx: CommandContext, args: str) -> None:
+        async def execute(self, ctx: UIContext, args: str) -> None:
             ext_ctx = _manager.make_context()
             ret = _handler(args, ext_ctx)
             if asyncio.iscoroutine(ret):

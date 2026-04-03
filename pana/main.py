@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 class PanaApp:
-    """Manages the TUI app lifecycle and implements :class:`CommandContext`."""
+    """Manages the TUI app lifecycle and implements :class:`UIContext`."""
 
     def __init__(self, extension_paths: list[str] | None = None) -> None:
         self.agent: Agent | None = None
@@ -129,7 +129,7 @@ class PanaApp:
 
     def _load_extensions(self) -> None:
         """Discover and load all extensions; register their commands."""
-        self._extension_manager = ExtensionManager(notify_fn=self.notify)
+        self._extension_manager = ExtensionManager(ui=self)
         paths = discover_extension_paths(self._extension_paths)
         for path in paths:
             api = ExtensionAPI()

@@ -4,7 +4,8 @@ from __future__ import annotations
 from pana.ai.providers.factory import get_provider, get_providers
 from pana.app import theme as _theme
 from pana.app import ui_themes
-from pana.app.commands.base import Command, CommandContext
+from pana.app.commands.base import Command
+from pana.tui.tui import UIContext
 from pana.tui.components.select_list import SelectItem, SelectList
 from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
@@ -15,7 +16,7 @@ class LoginCommand(Command):
     aliases = []
     description = "Authenticate with a provider"
 
-    async def execute(self, ctx: CommandContext, args: str) -> None:
+    async def execute(self, ctx: UIContext, args: str) -> None:
         providers = get_providers()
         if not providers:
             ctx.add_message(Text(_theme.error("No providers available."), padding_x=1, padding_y=0))

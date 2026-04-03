@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from pana.app import theme as _theme
-from pana.app.commands.base import Command, CommandContext
+from pana.app.commands.base import Command
+from pana.tui.tui import UIContext
 from pana.tui.components.text import Text
 
 
@@ -11,7 +12,7 @@ class NewCommand(Command):
     aliases = []
     description = "Start a new session"
 
-    async def execute(self, ctx: CommandContext, args: str) -> None:
+    async def execute(self, ctx: UIContext, args: str) -> None:
         ctx.clear_chat()
         ctx.add_message(Text(_theme.dim("✓ New session started"), padding_x=1, padding_y=0))
         ctx.request_render()

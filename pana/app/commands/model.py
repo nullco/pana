@@ -5,7 +5,8 @@ from pana.agents.agent import Agent
 from pana.ai.providers.factory import get_provider, get_providers
 from pana.app import theme as _theme
 from pana.app import ui_themes
-from pana.app.commands.base import Command, CommandContext
+from pana.app.commands.base import Command
+from pana.tui.tui import UIContext
 from pana.state import state
 from pana.tui.components.select_list import SelectItem, SelectList
 from pana.tui.components.spacer import Spacer
@@ -17,7 +18,7 @@ class ModelCommand(Command):
     aliases = []
     description = "Select a model"
 
-    async def execute(self, ctx: CommandContext, args: str) -> None:
+    async def execute(self, ctx: UIContext, args: str) -> None:
         # Collect available models from authenticated providers.
         options: dict[str, tuple[str, str]] = {}
         for pname in get_providers():
