@@ -91,6 +91,11 @@ class ANSI:
     # ── OSC hyperlink reset ────────────────────────────────────────────
     HYPERLINK_RESET = "\x1b]8;;\x07"
 
+    # ── OSC 133 semantic zones (shell integration) ──────────────────────
+    OSC133_ZONE_START = "\x1b]133;A\x07"
+    OSC133_ZONE_END   = "\x1b]133;B\x07"
+    OSC133_ZONE_FINAL = "\x1b]133;C\x07"
+
     # ── Application-level markers ─────────────────────────────────────
     CURSOR_MARKER = "\x1b_pi:c\x07"  # APC zero-width cursor position marker
 

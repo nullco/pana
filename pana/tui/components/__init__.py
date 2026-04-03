@@ -17,6 +17,7 @@ from pana.tui.components.settings_list import SettingItem, SettingsList, Setting
 from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 from pana.tui.components.truncated_text import TruncatedText
+from pana.tui.components.user_message import UserMessage
 
 __all__ = [
     "Box",
@@ -43,4 +44,5 @@ __all__ = [
     "Spacer",
     "Text",
     "TruncatedText",
+    "UserMessage",
 ]

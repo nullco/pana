@@ -3,25 +3,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re as _re
 import shutil
 from collections.abc import Callable
 
 from pana import __version__ as _version
-from pana.agents.agent import (
-    THINKING_LEVELS,
-    Agent,
-    TextEvent,
-    ThinkingEvent,
-    ToolCallEvent,
-    ToolCallUpdateEvent,
-    ToolResultEvent,
-)
+from pana.agents.agent import THINKING_LEVELS, Agent
 from pana.ai.providers.factory import get_provider
 from pana.app import theme as _theme
 from pana.app import ui_themes
+from pana.app.chat_themes import editor_theme
 from pana.app.commands import default_registry
-from pana.app.tool_renderer import ToolView, format_call, format_result
+from pana.app.input_processing import strip_at_prefixes
+from pana.app.stream_handler import StreamRenderer
 from pana.extensions import (
     ExtensionAPI,
     ExtensionManager,
@@ -33,65 +26,16 @@ from pana.extensions import (
 )
 from pana.state import state
 from pana.tui.autocomplete import CombinedAutocompleteProvider, SlashCommand
-from pana.tui.components.box import Box
 from pana.tui.components.cancellable_loader import CancellableLoader
-from pana.tui.components.editor import Editor, EditorOptions, EditorTheme
+from pana.tui.components.editor import Editor, EditorOptions
 from pana.tui.components.footer import Footer
-from pana.tui.components.markdown import DefaultTextStyle, Markdown, MarkdownTheme
 from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
+from pana.tui.components.user_message import UserMessage
 from pana.tui.terminal import ProcessTerminal
 from pana.tui.tui import TUI, Container
 
 logger = logging.getLogger(__name__)
-
-_OSC133_ZONE_START = "\x1b]133;A\x07"
-_OSC133_ZONE_END   = "\x1b]133;B\x07"
-_OSC133_ZONE_FINAL = "\x1b]133;C\x07"
-
-_AT_FILE_RE = _re.compile(r'@"([^"]+)"|@(\S+)')
-
-
-def _strip_at_prefixes(text: str) -> str:
-    """Strip ``@`` prefixes from file references so the LLM sees bare paths."""
-    return _AT_FILE_RE.sub(lambda m: m.group(1) or m.group(2), text)
-
-
-_editor_theme = EditorTheme(
-    border_color=_theme.border_muted,
-    select_list=ui_themes.editor_select_theme,
-)
-
-_md_theme = MarkdownTheme(
-    heading=_theme.heading,
-    link=_theme.link,
-    link_url=_theme.dim,
-    code=_theme.accent,
-    code_block=_theme.success,
-    code_block_border=_theme.muted,
-    quote=_theme.muted,
-    quote_border=_theme.muted,
-    hr=_theme.muted,
-    list_bullet=_theme.accent,
-    bold=_theme.bold,
-    italic=_theme.italic,
-    strikethrough=_theme.strikethrough,
-    underline=_theme.underline,
-    highlight_code=_theme.highlight_code,
-)
-
-
-class _UserMessage(Text):
-    """User chat bubble with OSC 133 semantic zone markers."""
-
-    def render(self, width: int) -> list[str]:
-        lines = super().render(width)
-        if not lines:
-            return lines
-        lines = list(lines)
-        lines[0] = _OSC133_ZONE_START + lines[0]
-        lines[-1] = lines[-1] + _OSC133_ZONE_END + _OSC133_ZONE_FINAL
-        return lines
 
 
 class PanaApp:
@@ -209,7 +153,7 @@ class PanaApp:
         )
 
         self._editor = Editor(
-            self.tui, _editor_theme,
+            self.tui, editor_theme,
             EditorOptions(padding_x=0, autocomplete_max_visible=5),
         )
         self._editor.set_autocomplete_provider(autocomplete)
@@ -296,7 +240,7 @@ class PanaApp:
             return
 
         self.add_message(Spacer(1))
-        self.add_message(_UserMessage(text, padding_x=1, padding_y=1, custom_bg_fn=_theme.user_msg_bg))
+        self.add_message(UserMessage(text, padding_x=1, padding_y=1, custom_bg_fn=_theme.user_msg_bg))
 
         if self._draining:
             self._pending_messages.append(text)
@@ -316,7 +260,7 @@ class PanaApp:
             return
         self._awaiting_response = True
 
-        user_text = _strip_at_prefixes(user_text)
+        user_text = strip_at_prefixes(user_text)
 
         # Fire before_agent_start — extensions may inject extra system-prompt text
         if self._extension_manager and self._extension_manager.has_extensions:
@@ -332,149 +276,20 @@ class PanaApp:
                 self.agent.set_extra_system_prompt(None)
 
         cancel_event = asyncio.Event()
-        _handler_active = True
-
-        tool_views: dict[str, ToolView] = {}
-        fallback_tool_views: list[ToolView] = []
-
-        md: Markdown | None = None
-        thinking_md: Markdown | None = None
-        thinking_placeholder: Text | None = None
-
         loader = CancellableLoader(self.tui, _theme.accent, _theme.dim, "Working...")
+        renderer = StreamRenderer(self, loader, cancel_event)
 
-        def on_abort() -> None:
-            nonlocal _handler_active
-            cancel_event.set()
-            _handler_active = False
-
-            for tv in list(tool_views.values()) + fallback_tool_views:
-                tv.box.set_bg_fn(_theme.tool_error_bg)
-
-            loader.stop()
-            try:
-                self._chat_container.remove_child(loader)
-            except Exception:
-                pass
-            self.add_message(Spacer(1))
-            self.add_message(Text(_theme.error("Operation aborted"), padding_x=1, padding_y=0))
-
-            self._awaiting_response = False
-            self._draining = True
-            self.tui.set_focus(self._editor)
-            self.tui.request_render()
-
-        loader.on_abort = on_abort
+        loader.on_abort = renderer.on_abort
         self.add_message(loader)
         self.tui.set_focus(loader)
 
-        def event_handler(event) -> None:
-            nonlocal md, thinking_md, thinking_placeholder
-
-            if not _handler_active:
-                return
-
-            self._chat_container.remove_child(loader)
-
-            if isinstance(event, ThinkingEvent):
-                if self.hide_thinking_block:
-                    if thinking_placeholder is None:
-                        self.add_message(Spacer(1))
-                        thinking_placeholder = Text(
-                            _theme.italic(_theme.thinking_text("Thinking...")),
-                            padding_x=1,
-                            padding_y=0,
-                        )
-                        self.add_message(thinking_placeholder)
-                else:
-                    if thinking_md is None:
-                        self.add_message(Spacer(1))
-                        thinking_md = Markdown(
-                            "",
-                            padding_x=1,
-                            padding_y=0,
-                            theme=_md_theme,
-                            default_text_style=DefaultTextStyle(
-                                color=_theme.thinking_text, italic=True
-                            ),
-                        )
-                        self.add_message(thinking_md)
-                    thinking_md.set_text(event.text)
-
-                self.add_message(loader)
-                self.tui.request_render()
-                return
-
-            thinking_md = None
-            thinking_placeholder = None
-
-            if isinstance(event, ToolCallEvent):
-                md = None
-
-                box = Box(padding_x=1, padding_y=1, bg_fn=_theme.tool_pending_bg)
-                call_text = format_call(event.tool_name, event.args)
-                call_text_component = Text(call_text, padding_x=0, padding_y=0)
-                box.add_child(call_text_component)
-
-                tv = ToolView(
-                    tool_name=event.tool_name,
-                    args=event.args,
-                    box=box,
-                    call_text_component=call_text_component,
-                )
-
-                self.add_message(Spacer(1))
-                self.add_message(box)
-
-                if event.tool_call_id:
-                    tool_views[event.tool_call_id] = tv
-                else:
-                    fallback_tool_views.append(tv)
-
-            elif isinstance(event, ToolCallUpdateEvent):
-                tv = tool_views.get(event.tool_call_id) if event.tool_call_id else None
-                if tv is not None:
-                    tv.args = event.args
-                    tv.call_text_component.set_text(format_call(event.tool_name, event.args))
-
-            elif isinstance(event, ToolResultEvent):
-                tv = None
-                if event.tool_call_id:
-                    tv = tool_views.get(event.tool_call_id)
-                if tv is None and fallback_tool_views:
-                    tv = fallback_tool_views.pop(0)
-
-                if tv is not None:
-                    if event.is_error:
-                        tv.box.set_bg_fn(_theme.tool_error_bg)
-                    else:
-                        tv.box.set_bg_fn(_theme.tool_success_bg)
-
-                    result_text = format_result(
-                        tv.tool_name, tv.args,
-                        event.result, event.elapsed_s, event.is_error,
-                    )
-                    if result_text is not None:
-                        tv.box.add_child(Text(result_text, padding_x=0, padding_y=0))
-
-            elif isinstance(event, TextEvent):
-                if md is None:
-                    self.add_message(Spacer(1))
-                    md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
-                    self.add_message(md)
-                md.set_text(event.text)
-
-            self.add_message(loader)
-            self.tui.request_render()
-
         _propagating_cancel = False
         try:
-            await self.agent.stream(user_text, event_handler, cancel_event=cancel_event)
+            await self.agent.stream(user_text, renderer.handle_event, cancel_event=cancel_event)
 
         except asyncio.CancelledError:
             _propagating_cancel = True
-            for tv in list(tool_views.values()) + fallback_tool_views:
-                tv.box.set_bg_fn(_theme.tool_error_bg)
+            renderer.mark_tools_error()
             self.add_message(Spacer(1))
             self.add_message(Text(_theme.error("Operation aborted"), padding_x=1, padding_y=0))
             raise
@@ -482,19 +297,12 @@ class PanaApp:
         except Exception as e:
             logger.exception("Error during agent stream")
             if not cancel_event.is_set():
-                for tv in list(tool_views.values()) + fallback_tool_views:
-                    tv.box.set_bg_fn(_theme.tool_error_bg)
-                err_md = Markdown("", padding_x=1, padding_y=0, theme=_md_theme)
-                self.add_message(err_md)
-                err_md.set_text(_theme.error(f"❌ {e}"))
+                renderer.mark_tools_error()
+                renderer.show_error(e)
             self.tui.request_render()
 
         finally:
-            loader.stop()
-            try:
-                self._chat_container.remove_child(loader)
-            except Exception:
-                pass
+            renderer.cleanup()
 
             if cancel_event.is_set():
                 self._draining = False
