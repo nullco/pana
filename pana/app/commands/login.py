@@ -2,13 +2,10 @@
 from __future__ import annotations
 
 from pana.ai.providers.factory import get_provider, get_providers
-from pana.app import theme as _theme
 from pana.app import ui_themes
 from pana.app.commands.base import Command
 from pana.app.context import UIContext
 from pana.tui.components.select_list import SelectItem, SelectList
-from pana.tui.components.spacer import Spacer
-from pana.tui.components.text import Text
 
 
 class LoginCommand(Command):
@@ -19,8 +16,7 @@ class LoginCommand(Command):
     async def execute(self, ctx: UIContext, args: str) -> None:
         providers = get_providers()
         if not providers:
-            ctx.add_message(Text(_theme.error("No providers available."), padding_x=1, padding_y=0))
-            ctx.add_message(Spacer(1))
+            ctx.notify("No providers available.", "error")
             return
 
         items = [SelectItem(value=p, label=p) for p in providers]
@@ -31,13 +27,12 @@ class LoginCommand(Command):
             restore()
 
             async def handler(message: str) -> None:
-                ctx.add_message(Text(_theme.muted(message), padding_x=1, padding_y=0))
+                ctx.notify(message, "muted")
 
             try:
                 await get_provider(item.value).authenticate(handler)
             except Exception as e:
-                ctx.add_message(Text(_theme.error(f"Auth failed: {e}"), padding_x=1, padding_y=0))
-            ctx.add_message(Spacer(1))
+                ctx.notify(f"Auth failed: {e}", "error")
 
         async def on_cancel() -> None:
             restore()

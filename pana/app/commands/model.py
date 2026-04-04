@@ -3,14 +3,11 @@ from __future__ import annotations
 
 from pana.agents.agent import Agent
 from pana.ai.providers.factory import get_provider, get_providers
-from pana.app import theme as _theme
 from pana.app import ui_themes
 from pana.app.commands.base import Command
 from pana.app.context import UIContext
 from pana.state import state
 from pana.tui.components.select_list import SelectItem, SelectList
-from pana.tui.components.spacer import Spacer
-from pana.tui.components.text import Text
 
 
 class ModelCommand(Command):
@@ -29,14 +26,7 @@ class ModelCommand(Command):
                 options[f"{model_id} ({pname})"] = (model_id, pname)
 
         if not options:
-            ctx.add_message(
-                Text(
-                    _theme.error("No models available. Login first (/login)."),
-                    padding_x=1,
-                    padding_y=0,
-                )
-            )
-            ctx.add_message(Spacer(1))
+            ctx.notify("No models available. Login first (/login).", "error")
             return
 
         items = [SelectItem(value=key, label=key) for key in options]
@@ -55,17 +45,9 @@ class ModelCommand(Command):
                     ctx.set_agent(Agent(model, thinking_level=thinking_level))
                 state.set("provider", provider_name)
                 state.set("model", model_id)
-                ctx.add_message(
-                    Text(
-                        _theme.success(f"Switched to {model_id} ({provider_name})."),
-                        padding_x=1,
-                        padding_y=0,
-                    )
-                )
-                ctx.update_footer()
+                ctx.notify(f"Switched to {model_id} ({provider_name}).", "success")
             except Exception as e:
-                ctx.add_message(Text(_theme.error(f"Failed: {e}"), padding_x=1, padding_y=0))
-            ctx.add_message(Spacer(1))
+                ctx.notify(f"Failed: {e}", "error")
 
         async def on_cancel() -> None:
             restore()

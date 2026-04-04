@@ -13,6 +13,7 @@ from pana.agents.agent import (
 )
 from pana.app import theme as _theme
 from pana.app.chat_themes import md_theme
+from pana.app.events import StreamAborted
 from pana.app.tool_renderer import ToolView, format_call, format_result
 from pana.tui.components.box import Box
 from pana.tui.components.markdown import DefaultTextStyle, Markdown
@@ -49,7 +50,7 @@ class StreamRenderer:
         if not self._active:
             return
 
-        self._app._chat_container.remove_child(self._loader)
+        self._app.remove_message(self._loader)
 
         if isinstance(event, ThinkingEvent):
             if self._app.hide_thinking_block:
@@ -150,19 +151,9 @@ class StreamRenderer:
         self.mark_tools_error()
 
         self._loader.stop()
-        try:
-            self._app._chat_container.remove_child(self._loader)
-        except Exception:
-            pass
-        self._app.add_message(Spacer(1))
-        self._app.add_message(
-            Text(_theme.error("Operation aborted"), padding_x=1, padding_y=0)
-        )
-
-        self._app._awaiting_response = False
-        self._app._draining = True
-        self._app.tui.set_focus(self._app._editor)
-        self._app.tui.request_render()
+        self._app.remove_message(self._loader)
+        self._app.notify("Operation aborted", "error")
+        self._app._bus.emit(StreamAborted())
 
     def mark_tools_error(self) -> None:
         """Mark all tracked tool views as errored."""
@@ -171,14 +162,9 @@ class StreamRenderer:
 
     def show_error(self, error: Exception) -> None:
         """Display an error message in the chat."""
-        err_md = Markdown("", padding_x=1, padding_y=0, theme=md_theme)
-        self._app.add_message(err_md)
-        err_md.set_text(_theme.error(f"❌ {error}"))
+        self._app.notify(f"❌ {error}", "error")
 
     def cleanup(self) -> None:
         """Remove the loader from the chat container."""
         self._loader.stop()
-        try:
-            self._app._chat_container.remove_child(self._loader)
-        except Exception:
-            pass
+        self._app.remove_message(self._loader)

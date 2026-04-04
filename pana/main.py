@@ -13,6 +13,7 @@ from pana.app import theme as _theme
 from pana.app import ui_themes
 from pana.app.chat_themes import editor_theme
 from pana.app.commands import default_registry
+from pana.app.events import AgentChanged, EventBus, StreamAborted
 from pana.app.extensions import (
     ExtensionAPI,
     ExtensionManager,
@@ -50,6 +51,8 @@ class PanaApp:
 
         self.terminal = ProcessTerminal()
         self.tui = TUI(self.terminal)
+        self._bus = EventBus(post_emit=self.tui.request_render)
+        self._register_event_handlers()
         self._chat_container = Container()
         self._editor_container = Container()
         self._editor: Editor | None = None
@@ -63,6 +66,13 @@ class PanaApp:
         """Append *component* to the chat area and request a re-render."""
         self._chat_container.add_child(component)  # type: ignore[arg-type]
         self.tui.request_render()
+
+    def remove_message(self, component: object) -> None:
+        """Remove *component* from the chat area (no-op if absent)."""
+        try:
+            self._chat_container.remove_child(component)  # type: ignore[arg-type]
+        except Exception:
+            pass
 
     def show_selector(
         self, component: object, focus_target: object | None = None
@@ -113,6 +123,7 @@ class PanaApp:
             agent._extension_manager = self._extension_manager
             agent._agent = agent._build_agent()
         self.agent = agent
+        self._bus.emit(AgentChanged())
 
     def set_hide_thinking_block(self, value: bool) -> None:
         """Set thinking-block visibility and persist it to state."""
@@ -124,13 +135,37 @@ class PanaApp:
         return _theme.get_current_theme()
 
     def notify(self, message: str, level: str = "info") -> None:
-        """Display a notification message in the chat area (used by extensions)."""
-        if level == "error":
-            styled = _theme.error(f"[ext] {message}")
-        else:
-            styled = _theme.muted(f"[ext] {message}")
-        self.add_message(Text(styled, padding_x=1, padding_y=0))
-        self.tui.request_render()
+        """Display a notification message in the chat area.
+
+        Supported *level* values: ``"info"``, ``"success"``, ``"error"``,
+        ``"warning"``, ``"muted"``.  A spacer is appended automatically.
+        """
+        style_fn = {
+            "error": _theme.error,
+            "success": _theme.success,
+            "warning": _theme.warning,
+            "muted": _theme.dim,
+        }.get(level, _theme.muted)
+        self.add_message(Text(style_fn(message), padding_x=1, padding_y=0))
+        self.add_message(Spacer(1))
+
+    # ------------------------------------------------------------------
+    # Internal event handlers
+    # ------------------------------------------------------------------
+
+    def _register_event_handlers(self) -> None:
+        self._bus.on(AgentChanged, self._on_agent_changed)
+        self._bus.on(StreamAborted, self._on_stream_aborted)
+
+    def _on_agent_changed(self, _event: AgentChanged) -> None:
+        self.update_footer()
+
+    def _on_stream_aborted(self, _event: StreamAborted) -> None:
+        self._awaiting_response = False
+        self._draining = True
+        self.tui.set_focus(self._editor)  # type: ignore[arg-type]
+
+    # ------------------------------------------------------------------
 
     def _load_extensions(self) -> None:
         """Discover and load all extensions; register their commands."""
@@ -190,7 +225,7 @@ class PanaApp:
 
     def _cycle_thinking_level(self) -> None:
         if not self.agent:
-            self.add_message(Text(_theme.muted("No model selected"), padding_x=1, padding_y=0))
+            self.notify("No model selected", "muted")
             return
         levels = list(THINKING_LEVELS)
         current = self.agent.thinking_level
@@ -199,14 +234,12 @@ class PanaApp:
         self.agent.set_thinking_level(next_level)
         state.set("thinking_level", next_level)
         self.update_footer()
-        self.add_message(Text(_theme.muted(f"Thinking level: {next_level}"), padding_x=1, padding_y=0))
-        self.tui.request_render()
+        self.notify(f"Thinking level: {next_level}", "muted")
 
     def _toggle_thinking_block_visibility(self) -> None:
         self.set_hide_thinking_block(not self.hide_thinking_block)
         label = "hidden" if self.hide_thinking_block else "visible"
-        self.add_message(Text(_theme.muted(f"Thinking blocks: {label}"), padding_x=1, padding_y=0))
-        self.tui.request_render()
+        self.notify(f"Thinking blocks: {label}", "muted")
 
     async def _on_submit(self, text: str) -> None:
         text = text.strip()
@@ -231,17 +264,11 @@ class PanaApp:
         if text.startswith("/"):
             handled = await default_registry.dispatch(text, self)
             if not handled:
-                self.add_message(
-                    Text(_theme.error(f"Unknown command: {text}"), padding_x=1, padding_y=0)
-                )
-                self.add_message(Spacer(1))
+                self.notify(f"Unknown command: {text}", "error")
             return
 
         if not self.agent:
-            self.add_message(
-                Text(_theme.error("\u274c Please select a model first (/model)"), padding_x=1, padding_y=0)
-            )
-            self.add_message(Spacer(1))
+            self.notify("\u274c Please select a model first (/model)", "error")
             return
 
         self.add_message(Spacer(1))
@@ -295,8 +322,7 @@ class PanaApp:
         except asyncio.CancelledError:
             _propagating_cancel = True
             renderer.mark_tools_error()
-            self.add_message(Spacer(1))
-            self.add_message(Text(_theme.error("Operation aborted"), padding_x=1, padding_y=0))
+            self.notify("Operation aborted", "error")
             raise
 
         except Exception as e:
