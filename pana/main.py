@@ -147,12 +147,6 @@ class PanaApp:
         self.add_message(Text(style_fn(message), padding_x=1, padding_y=0))
         self.add_message(Spacer(1))
 
-    def _handle_stream_aborted(self) -> None:
-        self._awaiting_response = False
-        self._draining = True
-        self.tui.set_focus(self._editor)  # type: ignore[arg-type]
-        self.tui.request_render()
-
     def _load_extensions(self) -> None:
         """Discover and load all extensions; register their commands."""
         self._extension_manager = ExtensionManager(ui=self)
@@ -297,7 +291,14 @@ class PanaApp:
         loader = CancellableLoader(self.tui, _theme.accent, _theme.dim, "Working...")
         renderer = StreamRenderer(self, loader, cancel_event)
 
-        loader.on_abort = renderer.on_abort
+        def on_abort() -> None:
+            renderer.on_abort()
+            self._awaiting_response = False
+            self._draining = True
+            self.tui.set_focus(self._editor)  # type: ignore[arg-type]
+            self.tui.request_render()
+
+        loader.on_abort = on_abort
         self.add_message(loader)
         self.tui.set_focus(loader)
 
@@ -325,7 +326,7 @@ class PanaApp:
                 self._draining = False
             else:
                 self._awaiting_response = False
-                self.tui.set_focus(self._editor)
+                self.tui.set_focus(self._editor)  # type: ignore[arg-type]
 
             self._stream_task = None
             self.tui.request_render()

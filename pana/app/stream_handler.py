@@ -152,7 +152,6 @@ class StreamRenderer:
         self._loader.stop()
         self._app.remove_message(self._loader)
         self._app.notify("Operation aborted", "error")
-        self._app._handle_stream_aborted()
 
     def mark_tools_error(self) -> None:
         """Mark all tracked tool views as errored."""
