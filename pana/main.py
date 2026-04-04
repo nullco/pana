@@ -13,7 +13,6 @@ from pana.app import theme as _theme
 from pana.app import ui_themes
 from pana.app.chat_themes import editor_theme
 from pana.app.commands import default_registry
-from pana.app.events import AgentChanged, EventBus, StreamAborted
 from pana.app.extensions import (
     ExtensionAPI,
     ExtensionManager,
@@ -51,8 +50,7 @@ class PanaApp:
 
         self.terminal = ProcessTerminal()
         self.tui = TUI(self.terminal)
-        self._bus = EventBus(post_emit=self.tui.request_render)
-        self._register_event_handlers()
+
         self._chat_container = Container()
         self._editor_container = Container()
         self._editor: Editor | None = None
@@ -123,7 +121,7 @@ class PanaApp:
             agent._extension_manager = self._extension_manager
             agent._agent = agent._build_agent()
         self.agent = agent
-        self._bus.emit(AgentChanged())
+        self.update_footer()
 
     def set_hide_thinking_block(self, value: bool) -> None:
         """Set thinking-block visibility and persist it to state."""
@@ -149,23 +147,11 @@ class PanaApp:
         self.add_message(Text(style_fn(message), padding_x=1, padding_y=0))
         self.add_message(Spacer(1))
 
-    # ------------------------------------------------------------------
-    # Internal event handlers
-    # ------------------------------------------------------------------
-
-    def _register_event_handlers(self) -> None:
-        self._bus.on(AgentChanged, self._on_agent_changed)
-        self._bus.on(StreamAborted, self._on_stream_aborted)
-
-    def _on_agent_changed(self, _event: AgentChanged) -> None:
-        self.update_footer()
-
-    def _on_stream_aborted(self, _event: StreamAborted) -> None:
+    def _handle_stream_aborted(self) -> None:
         self._awaiting_response = False
         self._draining = True
         self.tui.set_focus(self._editor)  # type: ignore[arg-type]
-
-    # ------------------------------------------------------------------
+        self.tui.request_render()
 
     def _load_extensions(self) -> None:
         """Discover and load all extensions; register their commands."""

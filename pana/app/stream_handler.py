@@ -13,7 +13,6 @@ from pana.agents.agent import (
 )
 from pana.app import theme as _theme
 from pana.app.chat_themes import md_theme
-from pana.app.events import StreamAborted
 from pana.app.tool_renderer import ToolView, format_call, format_result
 from pana.tui.components.box import Box
 from pana.tui.components.markdown import DefaultTextStyle, Markdown
@@ -153,7 +152,7 @@ class StreamRenderer:
         self._loader.stop()
         self._app.remove_message(self._loader)
         self._app.notify("Operation aborted", "error")
-        self._app._bus.emit(StreamAborted())
+        self._app._handle_stream_aborted()
 
     def mark_tools_error(self) -> None:
         """Mark all tracked tool views as errored."""
