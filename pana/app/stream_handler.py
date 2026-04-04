@@ -1,7 +1,6 @@
 """Stream event rendering for agent responses."""
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING
 
 from pana.agents.agent import (
@@ -20,7 +19,7 @@ from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 
 if TYPE_CHECKING:
-    from pana.main import PanaApp
+    from pana.app.context import UIContext
     from pana.tui.components.cancellable_loader import CancellableLoader
 
 
@@ -29,13 +28,11 @@ class StreamRenderer:
 
     def __init__(
         self,
-        app: PanaApp,
+        ctx: UIContext,
         loader: CancellableLoader,
-        cancel_event: asyncio.Event,
     ) -> None:
-        self._app = app
+        self._ctx = ctx
         self._loader = loader
-        self._cancel_event = cancel_event
 
         self._active = True
         self._tool_views: dict[str, ToolView] = {}
@@ -49,21 +46,21 @@ class StreamRenderer:
         if not self._active:
             return
 
-        self._app.remove_message(self._loader)
+        self._ctx.remove_message(self._loader)
 
         if isinstance(event, ThinkingEvent):
-            if self._app.hide_thinking_block:
+            if self._ctx.hide_thinking_block:
                 if self._thinking_placeholder is None:
-                    self._app.add_message(Spacer(1))
+                    self._ctx.add_message(Spacer(1))
                     self._thinking_placeholder = Text(
                         _theme.italic(_theme.thinking_text("Thinking...")),
                         padding_x=1,
                         padding_y=0,
                     )
-                    self._app.add_message(self._thinking_placeholder)
+                    self._ctx.add_message(self._thinking_placeholder)
             else:
                 if self._thinking_md is None:
-                    self._app.add_message(Spacer(1))
+                    self._ctx.add_message(Spacer(1))
                     self._thinking_md = Markdown(
                         "",
                         padding_x=1,
@@ -73,11 +70,11 @@ class StreamRenderer:
                             color=_theme.thinking_text, italic=True
                         ),
                     )
-                    self._app.add_message(self._thinking_md)
+                    self._ctx.add_message(self._thinking_md)
                 self._thinking_md.set_text(event.text)
 
-            self._app.add_message(self._loader)
-            self._app.tui.request_render()
+            self._ctx.add_message(self._loader)
+            self._ctx.request_render()
             return
 
         self._thinking_md = None
@@ -98,8 +95,8 @@ class StreamRenderer:
                 call_text_component=call_text_component,
             )
 
-            self._app.add_message(Spacer(1))
-            self._app.add_message(box)
+            self._ctx.add_message(Spacer(1))
+            self._ctx.add_message(box)
 
             if event.tool_call_id:
                 self._tool_views[event.tool_call_id] = tv
@@ -134,35 +131,19 @@ class StreamRenderer:
 
         elif isinstance(event, TextEvent):
             if self._md is None:
-                self._app.add_message(Spacer(1))
+                self._ctx.add_message(Spacer(1))
                 self._md = Markdown("", padding_x=1, padding_y=0, theme=md_theme)
-                self._app.add_message(self._md)
+                self._ctx.add_message(self._md)
             self._md.set_text(event.text)
 
-        self._app.add_message(self._loader)
-        self._app.tui.request_render()
+        self._ctx.add_message(self._loader)
+        self._ctx.request_render()
 
-    def on_abort(self) -> None:
-        """Handle user-initiated abort."""
+    def stop(self) -> None:
+        """Deactivate the renderer so future events are ignored."""
         self._active = False
-        self._cancel_event.set()
-
-        self.mark_tools_error()
-
-        self._loader.stop()
-        self._app.remove_message(self._loader)
-        self._app.notify("Operation aborted", "error")
 
     def mark_tools_error(self) -> None:
         """Mark all tracked tool views as errored."""
         for tv in list(self._tool_views.values()) + self._fallback_tool_views:
             tv.box.set_bg_fn(_theme.tool_error_bg)
-
-    def show_error(self, error: Exception) -> None:
-        """Display an error message in the chat."""
-        self._app.notify(f"❌ {error}", "error")
-
-    def cleanup(self) -> None:
-        """Remove the loader from the chat container."""
-        self._loader.stop()
-        self._app.remove_message(self._loader)

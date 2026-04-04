@@ -289,10 +289,15 @@ class PanaApp:
 
         cancel_event = asyncio.Event()
         loader = CancellableLoader(self.tui, _theme.accent, _theme.dim, "Working...")
-        renderer = StreamRenderer(self, loader, cancel_event)
+        renderer = StreamRenderer(self, loader)
 
         def on_abort() -> None:
-            renderer.on_abort()
+            renderer.stop()
+            cancel_event.set()
+            renderer.mark_tools_error()
+            loader.stop()
+            self.remove_message(loader)
+            self.notify("Operation aborted", "error")
             self._awaiting_response = False
             self._draining = True
             self.tui.set_focus(self._editor)  # type: ignore[arg-type]
@@ -316,11 +321,12 @@ class PanaApp:
             logger.exception("Error during agent stream")
             if not cancel_event.is_set():
                 renderer.mark_tools_error()
-                renderer.show_error(e)
+                self.notify(f"❌ {e}", "error")
             self.tui.request_render()
 
         finally:
-            renderer.cleanup()
+            loader.stop()
+            self.remove_message(loader)
 
             if cancel_event.is_set():
                 self._draining = False
