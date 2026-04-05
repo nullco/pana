@@ -45,6 +45,7 @@ class ModelCommand(Command):
                     ctx.set_agent(Agent(model, thinking_level=thinking_level))
                 state.set("provider", provider_name)
                 state.set("model", model_id)
+                ctx.update_footer()
                 ctx.notify(f"Switched to {model_id} ({provider_name}).", "success")
             except Exception as e:
                 ctx.notify(f"Failed: {e}", "error")
