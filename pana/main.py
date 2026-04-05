@@ -402,9 +402,7 @@ class PanaApp:
                     text = result.get("text", text)
 
         if text.startswith("/"):
-            handled = await default_registry.dispatch(text, self)
-            if not handled:
-                self.notify(f"Unknown command: {text}", "error")
+            asyncio.create_task(self._dispatch_command(text))
             return
 
         if not self.agent:
@@ -420,6 +418,11 @@ class PanaApp:
             return
 
         self._stream_task = asyncio.create_task(self._stream_response(text))
+
+    async def _dispatch_command(self, text: str) -> None:
+        handled = await default_registry.dispatch(text, self)
+        if not handled:
+            self.notify(f"Unknown command: {text}", "error")
 
     def _process_pending_messages(self) -> None:
         """Start the next queued message after a cancelled stream has drained."""

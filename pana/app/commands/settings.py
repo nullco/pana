@@ -13,7 +13,6 @@ from pana.app.context import UIContext
 from pana.state import state
 from pana.tui.components.select_list import SelectItem, SelectList
 from pana.tui.components.settings_list import SettingItem, SettingsList
-from pana.tui.theme import discover_themes
 
 logger = logging.getLogger(__name__)
 
@@ -31,17 +30,17 @@ class SettingsCommand(Command):
             done: Callable[[str | None], Awaitable[None]],
         ) -> SelectList:
             """Build a SelectList of all discoverable themes."""
-            theme_paths = discover_themes()
+            all_themes = ctx.get_all_themes()
             sel_items = [
                 SelectItem(
-                    value=name,
+                    value=t["name"] or "",
                     label=(
-                        f"{name}  {_theme.dim('← active')}"
-                        if name == current_value
-                        else f"{name}  {_theme.dim(str(theme_paths[name].parent))}"
+                        f"{t['name']}  {_theme.dim('← active')}"
+                        if t["name"] == current_value
+                        else f"{t['name']}  {_theme.dim(t.get('path') or '')}"
                     ),
                 )
-                for name in sorted(theme_paths)
+                for t in sorted(all_themes, key=lambda t: t.get("name") or "")
             ]
             select = SelectList(sel_items, 8, ui_themes.select_list_theme, searchable=True)
 
@@ -92,12 +91,9 @@ class SettingsCommand(Command):
             elif setting_id == "hide_thinking_block":
                 ctx.set_hide_thinking_block(value == "true")
             elif setting_id == "theme":
-                try:
-                    ui_themes.apply_theme(value)
-                    state.set("theme", value)
-                    ctx.request_render()
-                except Exception as exc:
-                    logger.warning("Failed to apply theme '%s': %s", value, exc)
+                result = ctx.set_theme(value)
+                if not result.get("success"):
+                    logger.warning("Failed to apply theme '%s': %s", value, result.get("error"))
             ctx.request_render()
 
         async def on_cancel() -> None:
