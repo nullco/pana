@@ -51,9 +51,10 @@ class StreamRenderer:
         if isinstance(event, ThinkingEvent):
             if self._ctx.hide_thinking_block:
                 if self._thinking_placeholder is None:
+                    label = self._ctx.hidden_thinking_label
                     self._ctx.add_message(Spacer(1))
                     self._thinking_placeholder = Text(
-                        _theme.italic(_theme.thinking_text("Thinking...")),
+                        _theme.italic(_theme.thinking_text(label)),
                         padding_x=1,
                         padding_y=0,
                     )

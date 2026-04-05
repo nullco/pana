@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import sys
 from collections.abc import Callable
 
 from pana import __version__ as _version
@@ -33,7 +34,7 @@ from pana.tui.components.spacer import Spacer
 from pana.tui.components.text import Text
 from pana.tui.components.user_message import UserMessage
 from pana.tui.terminal import ProcessTerminal
-from pana.tui.theme import PanaTheme
+from pana.tui.theme import PanaTheme, discover_themes
 from pana.tui.tui import TUI, Container
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,10 @@ class PanaApp:
         self._stream_task: asyncio.Task | None = None
         self._draining: bool = False
         self._pending_messages: list[str] = []
+        self._status_entries: dict[str, str] = {}
+        self._working_message: str = "Working..."
+        self._hidden_thinking_label: str = "Thinking..."
+        self._tools_expanded: bool = False
 
     def add_message(self, component: object) -> None:
         """Append *component* to the chat area and request a re-render."""
@@ -128,6 +133,11 @@ class PanaApp:
         self.hide_thinking_block = value
         state.set("hide_thinking_block", value)
 
+    @property
+    def theme(self) -> PanaTheme:
+        """Return the currently active :class:`~pana.tui.theme.PanaTheme`."""
+        return _theme.get_current_theme()
+
     def get_theme(self) -> PanaTheme:
         """Return the currently active :class:`~pana.tui.theme.PanaTheme`."""
         return _theme.get_current_theme()
@@ -146,6 +156,156 @@ class PanaApp:
         }.get(level, _theme.muted)
         self.add_message(Text(style_fn(message), padding_x=1, padding_y=0))
         self.add_message(Spacer(1))
+
+    async def select(
+        self, title: str, options: list[str], *, timeout: float | None = None
+    ) -> str | None:
+        """Show a selector dialog and return the user's choice (or ``None``)."""
+        from pana.tui.components.select_list import SelectItem, SelectList
+
+        if not options:
+            return None
+
+        future: asyncio.Future[str | None] = asyncio.get_running_loop().create_future()
+        items = [SelectItem(value=o, label=o) for o in options]
+        select = SelectList(items, min(len(items), 8), ui_themes.select_list_theme, searchable=True)
+
+        self.notify(title, "muted")
+        restore = self.show_selector(select)
+
+        async def on_select(item: SelectItem) -> None:
+            restore()
+            if not future.done():
+                future.set_result(item.value)
+
+        async def on_cancel() -> None:
+            restore()
+            if not future.done():
+                future.set_result(None)
+
+        select.on_select = on_select
+        select.on_cancel = on_cancel
+
+        if timeout is not None:
+            try:
+                return await asyncio.wait_for(future, timeout=timeout)
+            except asyncio.TimeoutError:
+                if not future.done():
+                    restore()
+                return None
+        return await future
+
+    async def confirm(
+        self, title: str, message: str, *, timeout: float | None = None
+    ) -> bool:
+        """Show a confirmation dialog.  Returns ``True`` for yes, ``False`` otherwise."""
+        result = await self.select(
+            f"{title}: {message}", ["Yes", "No"], timeout=timeout
+        )
+        return result == "Yes"
+
+    async def input(
+        self, title: str, placeholder: str = "", *, timeout: float | None = None
+    ) -> str | None:
+        """Show a text input dialog.  Returns the entered text or ``None``."""
+        return await self.editor(title, prefill=placeholder)
+
+    def set_status(self, key: str, text: str | None) -> None:
+        """Set or clear a named status entry in the footer."""
+        if text is not None:
+            self._status_entries[key] = text
+        else:
+            self._status_entries.pop(key, None)
+        self.update_footer()
+
+    def set_working_message(self, message: str | None = None) -> None:
+        """Set the loading message shown during streaming.
+
+        Pass ``None`` to restore the default ``"Working..."`` label.
+        """
+        self._working_message = message or "Working..."
+
+    @property
+    def hidden_thinking_label(self) -> str:
+        """Return the current label for collapsed thinking blocks."""
+        return self._hidden_thinking_label
+
+    def set_hidden_thinking_label(self, label: str | None = None) -> None:
+        """Set the label used for collapsed thinking blocks.
+
+        Pass ``None`` to restore the default ``"Thinking..."`` label.
+        """
+        self._hidden_thinking_label = label or "Thinking..."
+
+    def set_editor_text(self, text: str) -> None:
+        """Set the text in the input editor."""
+        if self._editor is not None:
+            self._editor.set_text(text)
+            self.tui.request_render()
+
+    def get_editor_text(self) -> str:
+        """Return the current text from the input editor."""
+        if self._editor is not None:
+            return self._editor.get_text()
+        return ""
+
+    async def editor(self, title: str, prefill: str = "") -> str | None:
+        """Show a multi-line editor for text editing.
+
+        Returns the submitted text, or ``None`` if the user cancelled.
+        """
+        future: asyncio.Future[str | None] = asyncio.get_running_loop().create_future()
+
+        edit = Editor(
+            self.tui,
+            editor_theme,
+            EditorOptions(padding_x=0, autocomplete_max_visible=5),
+        )
+        if prefill:
+            edit.set_text(prefill)
+
+        self.notify(title, "muted")
+        restore = self.show_selector(edit)
+
+        async def on_submit(text: str) -> None:
+            restore()
+            if not future.done():
+                future.set_result(text.strip() or None)
+
+        edit.on_submit = on_submit
+
+        return await future
+
+    def get_all_themes(self) -> list[dict[str, str | None]]:
+        """Return all available themes with their names and file paths."""
+        return [
+            {"name": name, "path": str(path)}
+            for name, path in discover_themes().items()
+        ]
+
+    def set_theme(self, theme_name: str) -> dict[str, object]:
+        """Set the current theme by name.  Returns ``{"success": True}`` on success."""
+        try:
+            ui_themes.apply_theme(theme_name)
+            state.set("theme", theme_name)
+            self.request_render()
+            return {"success": True}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    def get_tools_expanded(self) -> bool:
+        """Return whether tool output is expanded."""
+        return self._tools_expanded
+
+    def set_tools_expanded(self, expanded: bool) -> None:
+        """Set tool output expansion state."""
+        self._tools_expanded = expanded
+        self.request_render()
+
+    def set_title(self, title: str) -> None:
+        """Set the terminal window/tab title via an OSC escape sequence."""
+        sys.stdout.write(f"\033]0;{title}\007")
+        sys.stdout.flush()
 
     def _load_extensions(self) -> None:
         """Discover and load all extensions; register their commands."""
@@ -288,7 +448,7 @@ class PanaApp:
                 self.agent.set_extra_system_prompt(None)
 
         cancel_event = asyncio.Event()
-        loader = CancellableLoader(self.tui, _theme.accent, _theme.dim, "Working...")
+        loader = CancellableLoader(self.tui, _theme.accent, _theme.dim, self._working_message)
         renderer = StreamRenderer(self, loader)
 
         def on_abort() -> None:
